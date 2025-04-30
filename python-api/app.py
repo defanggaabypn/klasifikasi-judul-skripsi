@@ -918,6 +918,98 @@ def get_template():
         print(f"Error creating template: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# Endpoint untuk menghapus prediksi berdasarkan ID
+@app.route('/delete_prediction/<int:prediction_id>', methods=['DELETE'])
+def delete_prediction(prediction_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                # Periksa apakah prediksi ada
+                cursor.execute("SELECT id FROM predictions WHERE id = %s", (prediction_id,))
+                prediction = cursor.fetchone()
+                
+                if not prediction:
+                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
+                
+                # Hapus prediksi
+                cursor.execute("DELETE FROM predictions WHERE id = %s", (prediction_id,))
+                conn.commit()
+                
+                return jsonify({'success': True, 'message': 'Prediction deleted successfully'})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error deleting prediction: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint untuk mengambil semua prediksi (untuk halaman history)
+@app.route('/get_predictions', methods=['GET'])
+def get_predictions():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                           p.confidence, p.prediction_date, 
+                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    ORDER BY p.prediction_date DESC
+                """)
+                predictions = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for pred in predictions:
+                    if 'prediction_date' in pred and pred['prediction_date']:
+                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({'success': True, 'predictions': predictions})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting predictions: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan detail prediksi berdasarkan ID
+@app.route('/get_prediction/<int:prediction_id>', methods=['GET'])
+def get_prediction_detail(prediction_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                           p.confidence, p.prediction_date, 
+                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    WHERE p.id = %s
+                """, (prediction_id,))
+                prediction = cursor.fetchone()
+                
+                if not prediction:
+                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
+                
+                # Konversi datetime ke string
+                if 'prediction_date' in prediction and prediction['prediction_date']:
+                    prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({'success': True, 'prediction': prediction})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting prediction detail: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     print(f"Server starting on http://localhost:5000")
     print(f"Upload folder: {UPLOAD_FOLDER}")
