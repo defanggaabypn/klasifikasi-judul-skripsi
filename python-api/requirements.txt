@@ -1,8 +1,10 @@
-flask
-flask-cors
-pandas
-torch
-scikit-learn
-matplotlib
-numpy
-transformers
+    flask
+    flask-cors
+    pandas
+    torch
+    scikit-learn
+    matplotlib
+    numpy
+    transformers
+    pymysql
+    openpyxl

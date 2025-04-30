@@ -1,5 +1,19 @@
 <?php
 require_once 'config.php';
+require_once 'database_config.php';
+
+// Inisialisasi database jika data dari database akan digunakan
+$database = new Database();
+$connection = $database->getConnection();
+
+// Check database status
+$dbStatus = false;
+try {
+    $dbTest = $database->fetch("SELECT COUNT(*) as count FROM categories");
+    $dbStatus = ($dbTest !== false);
+} catch (Exception $e) {
+    $dbStatus = false;
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -114,6 +128,20 @@ require_once 'config.php';
             background-color: rgba(13, 110, 253, 0.1);
             color: #0d6efd;
         }
+        .model-detail-card {
+            margin-bottom: 20px;
+            border-left: 4px solid;
+        }
+        .knn-border {
+            border-left-color: #0d6efd;
+        }
+        .dt-border {
+            border-left-color: #198754;
+        }
+        .metric-pill {
+            font-size: 0.85rem;
+            padding: 0.25rem 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -145,17 +173,76 @@ require_once 'config.php';
                         <div class="step">3</div>
                     </div>
                     
+                    <!-- Breadcrumb -->
+                    <nav aria-label="breadcrumb" class="mb-3">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="index.php">Beranda</a></li>
+                            <li class="breadcrumb-item active" aria-current="page">Hasil Klasifikasi</li>
+                        </ol>
+                    </nav>
+                    
                     <div class="alert alert-success">
                         <i class="bi bi-check-circle-fill me-2"></i>
                         <strong>Berhasil!</strong> Klasifikasi telah selesai diproses.
                     </div>
                     
-                    <!-- Tombol untuk form prediksi -->
-                    <div class="text-end mb-3">
-                        <button id="showPredictionBtn" class="btn btn-primary">
-                            <i class="bi bi-search me-1"></i> Prediksi Judul Baru
-                        </button>
+                    <!-- Database Status -->
+                    <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3">
+                        <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
+                        Status Database: <?php echo $dbStatus ? 'Terhubung' : 'Tidak Terhubung - Periksa konfigurasi database Anda'; ?>
                     </div>
+                    
+                    <!-- Menu Navigasi -->
+                    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+                        <div class="container-fluid">
+                            <span class="navbar-brand">Menu:</span>
+                            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
+                                aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                                <span class="navbar-toggler-icon"></span>
+                            </button>
+                            <div class="collapse navbar-collapse" id="navbarNav">
+                                <ul class="navbar-nav">
+                                    <li class="nav-item">
+                                        <a class="nav-link" href="index.php">
+                                            <i class="bi bi-house-door"></i> Beranda
+                                        </a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link active" href="result.php">
+                                            <i class="bi bi-clipboard-data"></i> Hasil Klasifikasi
+                                        </a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" href="visualisasi.php">
+                                            <i class="bi bi-bar-chart"></i> Visualisasi Data
+                                        </a>
+                                    </li>
+                                    <li class="nav-item dropdown">
+                                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
+                                           data-bs-toggle="dropdown" aria-expanded="false">
+                                            <i class="bi bi-download"></i> Export
+                                        </a>
+                                        <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
+                                            <li><a class="dropdown-item" href="export.php?type=excel">Excel</a></li>
+                                            <li><a class="dropdown-item" href="export.php?type=pdf">PDF</a></li>
+                                        </ul>
+                                    </li>
+                                </ul>
+                                <div class="ms-auto">
+                                    <button id="showPredictionBtn" class="btn btn-primary btn-sm">
+                                        <i class="bi bi-search me-1"></i> Prediksi Judul Baru
+                                    </button>
+                                </div>
+                                <!-- API Status Indicator -->
+                                <div class="ms-2 d-flex align-items-center">
+                                    <small class="badge rounded-pill bg-light text-dark me-2" id="apiStatus">
+                                        <i class="bi bi-circle-fill text-secondary me-1" style="font-size: 0.5rem;"></i>
+                                        API Status
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </nav>
                     
                     <!-- Perbandingan Akurasi -->
                     <div class="section-card">
@@ -192,6 +279,118 @@ require_once 'config.php';
                                                         <div class="progress mt-2">
                                                             <div id="dtProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
                                                         </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="mt-4">
+                                                    <div class="d-flex justify-content-between align-items-center">
+                                                        <span class="text-muted small">Model dengan performa terbaik:</span>
+                                                    </div>
+                                                    <div class="alert alert-info py-2 mt-2 mb-0">
+                                                        <div class="d-flex align-items-center">
+                                                            <i class="bi bi-trophy me-2"></i>
+                                                            <strong id="bestModel">-</strong>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Perbandingan Metrik -->
+                                <div class="row mt-4">
+                                    <div class="col-12">
+                                        <h6><i class="bi bi-graph-up me-2"></i>Perbandingan Metrik Performance</h6>
+                                        <div class="img-container mt-3">
+                                            <img id="performanceComparisonImg" src="" alt="Perbandingan Metrik Performance" class="img-fluid">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Model Detail Cards -->
+                    <div class="section-card">
+                        <div class="card border">
+                            <div class="card-header bg-light">
+                                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Detail Model</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <!-- KNN Detail Card -->
+                                    <div class="col-md-6">
+                                        <div class="card model-detail-card knn-border">
+                                            <div class="card-body">
+                                                <h5 class="card-title text-primary">
+                                                    <i class="bi bi-bullseye me-2"></i>K-Nearest Neighbors
+                                                </h5>
+                                                <div id="knnDetailMetrics">
+                                                    <div class="d-flex gap-2 mt-3 mb-2 flex-wrap">
+                                                        <span class="badge bg-primary metric-pill">
+                                                            <i class="bi bi-people me-1"></i>
+                                                            n_neighbors: <span id="knnNeighbors">3</span>
+                                                        </span>
+                                                        <span class="badge bg-secondary metric-pill">
+                                                            <i class="bi bi-rulers me-1"></i>
+                                                            metric: minkowski
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    <div class="table-responsive mt-3">
+                                                        <table class="table table-sm table-bordered">
+                                                            <thead class="table-primary">
+                                                                <tr>
+                                                                    <th>Metric</th>
+                                                                    <th>Score</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody id="knnMetricsTableBody">
+                                                                <!-- KNN metrics will be inserted here -->
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Decision Tree Detail Card -->
+                                    <div class="col-md-6">
+                                        <div class="card model-detail-card dt-border">
+                                            <div class="card-body">
+                                                <h5 class="card-title text-success">
+                                                    <i class="bi bi-diagram-3 me-2"></i>Decision Tree
+                                                </h5>
+                                                <div id="dtDetailMetrics">
+                                                    <div class="d-flex gap-2 mt-3 mb-2 flex-wrap">
+                                                        <span class="badge bg-success metric-pill">
+                                                            <i class="bi bi-tree me-1"></i>
+                                                            Depth: <span id="dtDepth">0</span>
+                                                        </span>
+                                                        <span class="badge bg-success metric-pill">
+                                                            <i class="bi bi-journal me-1"></i>
+                                                            Leaves: <span id="dtLeaves">0</span>
+                                                        </span>
+                                                        <span class="badge bg-secondary metric-pill">
+                                                            <i class="bi bi-calculator me-1"></i>
+                                                            criterion: <span id="dtCriterion">gini</span>
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    <div class="table-responsive mt-3">
+                                                        <table class="table table-sm table-bordered">
+                                                            <thead class="table-success">
+                                                                <tr>
+                                                                    <th>Metric</th>
+                                                                    <th>Score</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody id="dtMetricsTableBody">
+                                                                <!-- DT metrics will be inserted here -->
+                                                            </tbody>
+                                                        </table>
                                                     </div>
                                                 </div>
                                             </div>
@@ -276,7 +475,7 @@ require_once 'config.php';
                                                 <th width="45%">Judul Skripsi</th>
                                                 <th width="15%">Label Sebenarnya</th>
                                                 <th width="15%">Prediksi KNN</th>
-                                                <th width="15%">Prediksi Decision Tree</th>
+                                                <th width="15%">Prediksi DT</th>
                                                 <th width="5%">Detail</th>
                                             </tr>
                                         </thead>
@@ -294,15 +493,18 @@ require_once 'config.php';
                         </div>
                     </div>
                     
-                    <!-- Tombol Kembali -->
-                    <div class="text-center mt-4">
-                        <a href="index.php" class="btn btn-primary">
-                            <i class="bi bi-arrow-left me-2"></i>Kembali ke Halaman Utama
+                    <!-- Navigation Buttons -->
+                    <div class="d-flex justify-content-between mt-4">
+                        <a href="index.php" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left me-1"></i> Kembali ke Upload
+                        </a>
+                        <a href="visualisasi.php" class="btn btn-primary">
+                            <i class="bi bi-bar-chart me-1"></i> Lihat Visualisasi Data
                         </a>
                     </div>
                 </div>
                 <div class="card-footer text-center text-muted">
-                    <small>Sistem Klasifikasi Judul Skripsi v<?php echo APP_VERSION; ?></small>
+                    <small>Sistem Klasifikasi Judul Skripsi v<?php echo APP_VERSION; ?> | <?php echo date('Y'); ?></small>
                 </div>
             </div>
         </div>
@@ -319,6 +521,15 @@ require_once 'config.php';
                     <div class="step active">2</div>
                     <div class="step active">3</div>
                 </div>
+                
+                <!-- Breadcrumb -->
+                <nav aria-label="breadcrumb" class="mb-3">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="index.php">Beranda</a></li>
+                        <li class="breadcrumb-item"><a href="result.php">Hasil Klasifikasi</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Prediksi Judul Baru</li>
+                    </ol>
+                </nav>
                 
                 <form id="predictForm" class="mb-4">
                     <div class="mb-3">
@@ -379,7 +590,7 @@ require_once 'config.php';
                             
                             <div class="alert alert-info mt-4 mb-0">
                                 <i class="bi bi-info-circle me-2"></i>
-                                <span id="predictionMessage">Kedua model memberikan hasil prediksi yang sama, menunjukkan tingkat kepercayaan yang tinggi.</span>
+                                <span id="predictionMessage"></span>
                             </div>
                         </div>
                     </div>
@@ -442,6 +653,32 @@ require_once 'config.php';
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Cek status API
+            const apiStatusEl = document.getElementById('apiStatus');
+            checkApiStatus();
+            
+            function checkApiStatus() {
+                fetch('<?php echo API_URL; ?>/template', { 
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    // Timeout 5 detik
+                    signal: AbortSignal.timeout(5000)
+                })
+                .then(response => {
+                    if (response.ok) {
+                        apiStatusEl.innerHTML = '<i class="bi bi-circle-fill text-success me-1" style="font-size: 0.5rem;"></i> API Connected';
+                        apiStatusEl.classList.replace('text-dark', 'text-success');
+                    } else {
+                        throw new Error('API response not OK');
+                    }
+                })
+                .catch(error => {
+                    apiStatusEl.innerHTML = '<i class="bi bi-circle-fill text-danger me-1" style="font-size: 0.5rem;"></i> API Disconnected';
+                    apiStatusEl.classList.replace('text-dark', 'text-danger');
+                    console.error('API Status Check Error:', error);
+                });
+            }
+            
             // Cek apakah ada data hasil klasifikasi di sessionStorage
             const resultsData = sessionStorage.getItem('classificationResults');
             
@@ -463,6 +700,13 @@ require_once 'config.php';
             // Update progress bar
             document.getElementById('knnProgress').style.width = knnAccuracy + '%';
             document.getElementById('dtProgress').style.width = dtAccuracy + '%';
+            
+            // Tentukan model terbaik
+            if (parseFloat(knnAccuracy) >= parseFloat(dtAccuracy)) {
+                document.getElementById('bestModel').textContent = 'KNN (' + knnAccuracy + '%)';
+            } else {
+                document.getElementById('bestModel').textContent = 'Decision Tree (' + dtAccuracy + '%)';
+            }
             
             // Tampilkan grafik akurasi menggunakan Chart.js
             const ctx = document.getElementById('accuracyChart').getContext('2d');
@@ -518,6 +762,89 @@ require_once 'config.php';
             document.getElementById('dtMatrix').innerHTML = 
                 `<img src="data:image/png;base64,${data.dt_cm_img}" alt="Decision Tree Confusion Matrix" class="img-fluid">`;
             
+            // Tampilkan perbandingan performa
+            if (data.performance_comparison_img) {
+                document.getElementById('performanceComparisonImg').src = 
+                    `data:image/png;base64,${data.performance_comparison_img}`;
+            }
+            
+            // Tampilkan detail metrik KNN
+            if (data.knn_detailed) {
+                // Update KNN parameters
+                if (data.knn_detailed.per_class) {
+                    // Display class metrics in a table
+                    const knnMetricsTable = document.getElementById('knnMetricsTableBody');
+                    knnMetricsTable.innerHTML = '';
+                    
+                    // Overall metrics first
+                    knnMetricsTable.innerHTML += `
+                        <tr>
+                            <td>Accuracy</td>
+                            <td>${(data.knn_detailed.overall.accuracy * 100).toFixed(2)}%</td>
+                        </tr>
+                    `;
+                    
+                    // Check if classification report exists
+                    if (data.knn_detailed.classification_report && data.knn_detailed.classification_report['weighted avg']) {
+                        const weighted = data.knn_detailed.classification_report['weighted avg'];
+                        knnMetricsTable.innerHTML += `
+                            <tr>
+                                <td>Precision (weighted)</td>
+                                <td>${(weighted.precision * 100).toFixed(2)}%</td>
+                            </tr>
+                            <tr>
+                                <td>Recall (weighted)</td>
+                                <td>${(weighted.recall * 100).toFixed(2)}%</td>
+                            </tr>
+                            <tr>
+                                <td>F1-Score (weighted)</td>
+                                <td>${(weighted['f1-score'] * 100).toFixed(2)}%</td>
+                            </tr>
+                        `;
+                    }
+                }
+            }
+            
+            // Tampilkan detail metrik Decision Tree
+            if (data.dt_detailed) {
+                // Update DT parameters
+                document.getElementById('dtDepth').textContent = data.dt_detailed.overall.tree_depth || '0';
+                document.getElementById('dtLeaves').textContent = data.dt_detailed.overall.n_leaves || '0';
+                
+                if (data.dt_detailed.per_class) {
+                    // Display class metrics in a table
+                    const dtMetricsTable = document.getElementById('dtMetricsTableBody');
+                    dtMetricsTable.innerHTML = '';
+                    
+                    // Overall metrics first
+                    dtMetricsTable.innerHTML += `
+                        <tr>
+                            <td>Accuracy</td>
+                            <td>${(data.dt_detailed.overall.accuracy * 100).toFixed(2)}%</td>
+                        </tr>
+                    `;
+                    
+                    // Check if classification report exists
+                    if (data.dt_detailed.classification_report && data.dt_detailed.classification_report['weighted avg']) {
+                        const weighted = data.dt_detailed.classification_report['weighted avg'];
+                        dtMetricsTable.innerHTML += `
+                            <tr>
+                                <td>Precision (weighted)</td>
+                                <td>${(weighted.precision * 100).toFixed(2)}%</td>
+                            </tr>
+                            <tr>
+                                <td>Recall (weighted)</td>
+                                <td>${(weighted.recall * 100).toFixed(2)}%</td>
+                            </tr>
+                            <tr>
+                                <td>F1-Score (weighted)</td>
+                                <td>${(weighted['f1-score'] * 100).toFixed(2)}%</td>
+                            </tr>
+                        `;
+                    }
+                }
+            }
+            
             // Tampilkan tabel hasil
             const tableBody = document.getElementById('resultsTableBody');
             tableBody.innerHTML = '';
@@ -531,8 +858,12 @@ require_once 'config.php';
                 tr.dataset.actual = row.actual;
                 tr.dataset.knn = row.knn_pred;
                 tr.dataset.dt = row.dt_pred;
-                tr.dataset.correct = (correctKNN && correctDT) ? 'both' : 
-                                    (correctKNN || correctDT) ? 'partial' : 'none';
+                
+                // Determine overall correctness
+                const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
+                
+                tr.dataset.correct = (correctCount === 2) ? 'all' : 
+                                     (correctCount > 0) ? 'partial' : 'none';
                 
                 const knnClass = correctKNN ? 'table-success' : 'table-danger';
                 const dtClass = correctDT ? 'table-success' : 'table-danger';
@@ -561,7 +892,7 @@ require_once 'config.php';
             // Fungsi untuk filter dan pencarian
             function filterTable() {
                 const searchTerm = searchInput.value.toLowerCase();
-                const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+                const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
                 let visibleCount = 0;
                 
                 Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
@@ -574,8 +905,8 @@ require_once 'config.php';
                     // Filter berdasarkan status (benar/salah)
                     const matchesFilter = 
                         activeFilter === 'all' || 
-                        (activeFilter === 'correct' && correct === 'both') ||
-                        (activeFilter === 'incorrect' && correct !== 'both');
+                        (activeFilter === 'correct' && correct === 'all') ||
+                        (activeFilter === 'incorrect' && correct !== 'all');
                     
                     if (matchesSearch && matchesFilter) {
                         row.style.display = '';
@@ -604,10 +935,13 @@ require_once 'config.php';
             });
             
             // Aktifkan "all" filter by default
-            document.querySelector('[data-filter="all"]').classList.add('active');
+            const allFilterBtn = document.querySelector('[data-filter="all"]');
+            if (allFilterBtn) allFilterBtn.classList.add('active');
             
             // Aktifkan pencarian
-            searchInput.addEventListener('input', filterTable);
+            if (searchInput) {
+                searchInput.addEventListener('input', filterTable);
+            }
             
             // Event handler untuk tombol detail
             const detailButtons = document.querySelectorAll('.detail-btn');
@@ -625,97 +959,114 @@ require_once 'config.php';
             });
             
             // Event handler untuk tombol prediksi
-            document.getElementById('showPredictionBtn').addEventListener('click', function() {
-                document.getElementById('predictionForm').style.display = 'block';
-                document.getElementById('results').style.display = 'none';
-                document.getElementById('predictionResult').style.display = 'none';
-                document.getElementById('title').value = '';
-                window.scrollTo(0, 0);
-            });
+            const showPredictionBtn = document.getElementById('showPredictionBtn');
+            if (showPredictionBtn) {
+                showPredictionBtn.addEventListener('click', function() {
+                    document.getElementById('predictionForm').style.display = 'block';
+                    document.getElementById('results').style.display = 'none';
+                    document.getElementById('predictionResult').style.display = 'none';
+                    document.getElementById('title').value = '';
+                    window.scrollTo(0, 0);
+                });
+            }
             
             // Event handler untuk pembatalan prediksi
-            document.getElementById('cancelPredict').addEventListener('click', function() {
-                document.getElementById('predictionForm').style.display = 'none';
-                document.getElementById('results').style.display = 'block';
-                window.scrollTo(0, 0);
-            });
+            const cancelPredict = document.getElementById('cancelPredict');
+            if (cancelPredict) {
+                cancelPredict.addEventListener('click', function() {
+                    document.getElementById('predictionForm').style.display = 'none';
+                    document.getElementById('results').style.display = 'block';
+                    window.scrollTo(0, 0);
+                });
+            }
             
             // Event handler untuk kembali ke hasil
-            document.getElementById('backToResultsBtn').addEventListener('click', function() {
-                document.getElementById('predictionForm').style.display = 'none';
-                document.getElementById('results').style.display = 'block';
-                window.scrollTo(0, 0);
-            });
+            const backToResultsBtn = document.getElementById('backToResultsBtn');
+            if (backToResultsBtn) {
+                backToResultsBtn.addEventListener('click', function() {
+                    document.getElementById('predictionForm').style.display = 'none';
+                    document.getElementById('results').style.display = 'block';
+                    window.scrollTo(0, 0);
+                });
+            }
             
             // Event handler untuk prediksi baru
-            document.getElementById('newPredictionBtn').addEventListener('click', function() {
-                document.getElementById('predictionResult').style.display = 'none';
-                document.getElementById('title').value = '';
-                document.getElementById('predictForm').style.display = 'block';
-            });
+            const newPredictionBtn = document.getElementById('newPredictionBtn');
+            if (newPredictionBtn) {
+                newPredictionBtn.addEventListener('click', function() {
+                    document.getElementById('predictionResult').style.display = 'none';
+                    document.getElementById('title').value = '';
+                    document.getElementById('predictForm').style.display = 'block';
+                });
+            }
             
             // Event handler untuk form prediksi
-            document.getElementById('predictForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const title = document.getElementById('title').value.trim();
-                if (!title) {
-                    alert('Silakan masukkan judul skripsi!');
-                    return;
-                }
-                
-                // Tampilkan loading
-                document.getElementById('loadingPredict').style.display = 'block';
-                document.getElementById('predictionResult').style.display = 'none';
-                document.getElementById('predictForm').style.display = 'none';
-                
-                // Kirim request ke API
-                fetch('<?php echo API_URL; ?>/predict', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ title: title })
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Sembunyikan loading
-                    document.getElementById('loadingPredict').style.display = 'none';
+            const predictForm = document.getElementById('predictForm');
+            if (predictForm) {
+                predictForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
                     
-                    // Tampilkan hasil prediksi
-                    document.getElementById('predictedTitle').textContent = data.title;
-                    document.getElementById('predictedKNN').textContent = data.knn_prediction;
-                    document.getElementById('predictedDT').textContent = data.dt_prediction;
-                    
-                    // Tampilkan confidence info jika ada
-                    if (data.nearest_neighbors && data.nearest_neighbors.length > 0) {
-                        document.getElementById('knnConfidence').textContent = "Berdasarkan " + data.nearest_neighbors[0];
+                    const title = document.getElementById('title').value.trim();
+                    if (!title) {
+                        alert('Silakan masukkan judul skripsi!');
+                        return;
                     }
                     
-                    // Pesan tentang hasil
-                    const predictionMessage = document.getElementById('predictionMessage');
-                    if (data.knn_prediction === data.dt_prediction) {
-                        predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama, menunjukkan tingkat kepercayaan yang tinggi.";
-                    } else {
-                        predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan keduanya.";
-                    }
+                    // Tampilkan loading
+                    document.getElementById('loadingPredict').style.display = 'block';
+                    document.getElementById('predictionResult').style.display = 'none';
+                    document.getElementById('predictForm').style.display = 'none';
                     
-                    document.getElementById('predictionResult').style.display = 'block';
-                })
-                .catch(error => {
-                    // Sembunyikan loading
-                    document.getElementById('loadingPredict').style.display = 'none';
-                    document.getElementById('predictForm').style.display = 'block';
-                    
-                    console.error('Error:', error);
-                    alert('Terjadi kesalahan saat memproses prediksi. Silakan coba lagi.');
+                    // Kirim request ke API
+                    fetch('<?php echo API_URL; ?>/predict', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ title: title })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Sembunyikan loading
+                        document.getElementById('loadingPredict').style.display = 'none';
+                        
+                        // Tampilkan hasil prediksi
+                        document.getElementById('predictedTitle').textContent = data.title;
+                        document.getElementById('predictedKNN').textContent = data.knn_prediction;
+                        document.getElementById('predictedDT').textContent = data.dt_prediction;
+                        
+                        // Tampilkan confidence info jika ada
+                        if (data.nearest_neighbors && data.nearest_neighbors.length > 0) {
+                            document.getElementById('knnConfidence').textContent = "Berdasarkan " + data.nearest_neighbors[0];
+                        }
+                        
+                        // Pesan tentang hasil
+                        const predictionMessage = document.getElementById('predictionMessage');
+                        const knnMatch = data.knn_prediction === data.dt_prediction;
+                        
+                        if (knnMatch) {
+                            predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama, menunjukkan tingkat kepercayaan yang tinggi.";
+                        } else {
+                            predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan keduanya berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
+                        }
+                        
+                        document.getElementById('predictionResult').style.display = 'block';
+                    })
+                    .catch(error => {
+                        // Sembunyikan loading
+                        document.getElementById('loadingPredict').style.display = 'none';
+                        document.getElementById('predictForm').style.display = 'block';
+                        
+                        console.error('Error:', error);
+                        alert('Terjadi kesalahan saat memproses prediksi. Silakan coba lagi.');
+                    });
                 });
-            });
+            }
         });
     </script>
 </body>

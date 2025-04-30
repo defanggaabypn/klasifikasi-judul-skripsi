@@ -25,6 +25,12 @@ define('APP_VERSION', '1.0.0');
 // Kategori skripsi
 define('CATEGORIES', ['RPL', 'Jaringan', 'Multimedia']);
 
+// Konfigurasi database
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'skripsi_classification');
+define('DB_USER', 'root');
+define('DB_PASS', '');
+
 // Fungsi untuk menampilkan pesan error/sukses
 function showAlert($message, $type = 'danger') {
     echo '<div class="alert alert-' . $type . ' alert-dismissible fade show" role="alert">';
@@ -83,4 +89,28 @@ function downloadBase64File($base64Data, $filename) {
     header('Content-Length: ' . strlen($data));
     echo $data;
     exit;
+}
+
+// Fungsi untuk koneksi ke database menggunakan PDO
+function getPDO() {
+    static $pdo;
+    
+    if (!$pdo) {
+        try {
+            $pdo = new PDO(
+                'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+                DB_USER,
+                DB_PASS,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false
+                ]
+            );
+        } catch (PDOException $e) {
+            die('Koneksi database gagal: ' . $e->getMessage());
+        }
+    }
+    
+    return $pdo;
 }

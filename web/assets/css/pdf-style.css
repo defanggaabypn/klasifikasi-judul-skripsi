@@ -1,0 +1,101 @@
+/* File: web/assets/css/pdf-style.css */
+body {
+    font-family: Arial, sans-serif;
+    font-size: 12pt;
+    line-height: 1.5;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    font-size: 20pt;
+    color: #0D6EFD;
+    margin-bottom: 5px;
+}
+
+.header p {
+    font-size: 10pt;
+    color: #666;
+}
+
+.stat-box {
+    display: flex;
+    justify-content: space-around;
+    margin: 20px 0;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.stat-item {
+    text-align: center;
+    padding: 10px;
+}
+
+.stat-item h3 {
+    font-size: 12pt;
+    margin: 0 0 5px 0;
+    color: #333;
+}
+
+.stat-value {
+    font-size: 18pt;
+    font-weight: bold;
+    color: #0D6EFD;
+}
+
+h2 {
+    font-size: 16pt;
+    color: #333;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #ddd;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+.data-table th {
+    background-color: #0D6EFD;
+    color: white;
+    padding: 8px;
+    text-align: left;
+    font-size: 10pt;
+}
+
+.data-table td {
+    padding: 8px;
+    border-bottom: 1px solid #ddd;
+    font-size: 9pt;
+}
+
+.data-table tr.correct-both {
+    background-color: #D1E7DD;
+}
+
+.data-table tr.correct-knn {
+    background-color: #E2F0FD;
+}
+
+.data-table tr.correct-dt {
+    background-color: #E7F1D9;
+}
+
+.data-table tr.incorrect {
+    background-color: #F8D7DA;
+}
+
+.footer-stats {
+    margin-top: 20px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    font-size: 10pt;
+}
