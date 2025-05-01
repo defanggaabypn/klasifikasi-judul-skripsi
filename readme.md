@@ -41,40 +41,7 @@ Sistem ini mengimplementasikan analisis perbandingan algoritma machine learning 
 - Visualisasi detail metrik performa model
 
 ## Struktur Proyek
-project/
-├── python-api/
-│   ├── cache/
-│   ├── models/
-│   ├── uploads/
-│   ├── venv/
-│   ├── app.py
-│   └── requirements.txt
-├── web/
-│   ├── assets/
-│   │   └── css/
-│   │       └── pdf-style.css
-│   ├── clasess/
-│   │   └── Exporter.php
-│   ├── temp/
-│   ├── uploads/
-│   ├── vendor/
-│   ├── composer.json
-│   ├── composer.lock
-│   ├── config.php
-│   ├── databse_config.php
-│   ├── delete_history.php        
-│   ├── export.php
-|   |__ history.php
-│   ├── index.php
-│   ├── install.php
-│   ├── result.php
-│   ├── save_upload.php
-│   ├── visualisasi.php
-│   └── .gitignore
-├── eror.txt
-├── setup_environment.bat
-└── start-server.bat
-
+project/ ├── python-api/ # API backend Python │ ├── cache/ # Cache untuk embedding │ ├── models/ # Model machine learning tersimpan │ ├── uploads/ # File Excel yang diunggah │ ├── venv/ # Virtual environment Python │ ├── app.py # Kode utama API Python │ └── requirements.txt # Dependensi Python ├── web/ # Frontend web PHP │ ├── assets/ # Aset statis │ │ └── css/ │ │ └── pdf-style.css # Styling untuk ekspor PDF │ ├── clasess/ # Kelas PHP │ │ └── Exporter.php # Fungsionalitas ekspor │ ├── temp/ # File sementara │ ├── uploads/ # File yang diunggah │ ├── vendor/ # Dependensi Composer │ ├── composer.json # Konfigurasi Composer │ ├── composer.lock # File lock Composer │ ├── config.php # Konfigurasi aplikasi │ ├── databse_config.php # Konfigurasi database │ ├── delete_history.php # Fungsionalitas penghapusan riwayat │ ├── export.php # Fungsionalitas ekspor │ ├── history.php # Tampilan riwayat │ ├── index.php # Titik masuk utama aplikasi │ ├── install.php # Skrip instalasi │ ├── result.php # Tampilan hasil │ ├── save_upload.php # Penanganan unggahan │ ├── visualisasi.php # Halaman visualisasi │ └── .gitignore # File Git ignore ├── eror.txt # File log kesalahan ├── setup_environment.bat # Skrip pengaturan Windows └── start-server.bat # Skrip memulai server Windows
 
 ## Persyaratan Sistem
 
