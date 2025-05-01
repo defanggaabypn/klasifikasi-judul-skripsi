@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Waktu pembuatan: 01 Bulan Mei 2025 pada 00.50
+-- Waktu pembuatan: 01 Bulan Mei 2025 pada 19.44
 -- Versi server: 10.4.32-MariaDB
 -- Versi PHP: 8.2.12
 
@@ -59,6 +59,21 @@ INSERT INTO `categories` (`id`, `name`, `description`) VALUES
 -- --------------------------------------------------------
 
 --
+-- Struktur dari tabel `classification_results`
+--
+
+CREATE TABLE `classification_results` (
+  `id` int(11) NOT NULL,
+  `title_id` int(11) NOT NULL,
+  `knn_prediction_id` int(11) NOT NULL,
+  `dt_prediction_id` int(11) NOT NULL,
+  `confidence` float DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Struktur dari tabel `keyword_analysis`
 --
 
@@ -66,7 +81,8 @@ CREATE TABLE `keyword_analysis` (
   `id` int(11) NOT NULL,
   `category_id` int(11) DEFAULT NULL,
   `keyword` varchar(100) NOT NULL,
-  `frequency` int(11) DEFAULT 1
+  `frequency` int(11) DEFAULT 1,
+  `upload_file_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -80,7 +96,8 @@ CREATE TABLE `model_performances` (
   `model_name` varchar(50) NOT NULL,
   `accuracy` float NOT NULL,
   `parameters` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`parameters`)),
-  `training_date` timestamp NOT NULL DEFAULT current_timestamp()
+  `training_date` timestamp NOT NULL DEFAULT current_timestamp(),
+  `upload_file_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -110,7 +127,8 @@ CREATE TABLE `thesis_titles` (
   `id` int(11) NOT NULL,
   `title` text NOT NULL,
   `category_id` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `upload_file_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -145,17 +163,28 @@ ALTER TABLE `categories`
   ADD PRIMARY KEY (`id`);
 
 --
+-- Indeks untuk tabel `classification_results`
+--
+ALTER TABLE `classification_results`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `title_id` (`title_id`),
+  ADD KEY `knn_prediction_id` (`knn_prediction_id`),
+  ADD KEY `dt_prediction_id` (`dt_prediction_id`);
+
+--
 -- Indeks untuk tabel `keyword_analysis`
 --
 ALTER TABLE `keyword_analysis`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `category_id` (`category_id`);
+  ADD KEY `category_id` (`category_id`),
+  ADD KEY `fk_keyword_upload_file` (`upload_file_id`);
 
 --
 -- Indeks untuk tabel `model_performances`
 --
 ALTER TABLE `model_performances`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `fk_model_perf_upload_file` (`upload_file_id`);
 
 --
 -- Indeks untuk tabel `predictions`
@@ -172,7 +201,8 @@ ALTER TABLE `predictions`
 --
 ALTER TABLE `thesis_titles`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `category_id` (`category_id`);
+  ADD KEY `category_id` (`category_id`),
+  ADD KEY `fk_thesis_upload_file` (`upload_file_id`);
 
 --
 -- Indeks untuk tabel `uploaded_files`
@@ -188,7 +218,7 @@ ALTER TABLE `uploaded_files`
 -- AUTO_INCREMENT untuk tabel `activity_log`
 --
 ALTER TABLE `activity_log`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
 
 --
 -- AUTO_INCREMENT untuk tabel `categories`
@@ -197,44 +227,65 @@ ALTER TABLE `categories`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
 
 --
+-- AUTO_INCREMENT untuk tabel `classification_results`
+--
+ALTER TABLE `classification_results`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1141;
+
+--
 -- AUTO_INCREMENT untuk tabel `keyword_analysis`
 --
 ALTER TABLE `keyword_analysis`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=481;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1441;
 
 --
 -- AUTO_INCREMENT untuk tabel `model_performances`
 --
 ALTER TABLE `model_performances`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=53;
 
 --
 -- AUTO_INCREMENT untuk tabel `predictions`
 --
 ALTER TABLE `predictions`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1522;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4394;
 
 --
 -- AUTO_INCREMENT untuk tabel `thesis_titles`
 --
 ALTER TABLE `thesis_titles`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=945;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6709;
 
 --
 -- AUTO_INCREMENT untuk tabel `uploaded_files`
 --
 ALTER TABLE `uploaded_files`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=26;
 
 --
 -- Ketidakleluasaan untuk tabel pelimpahan (Dumped Tables)
 --
 
 --
+-- Ketidakleluasaan untuk tabel `classification_results`
+--
+ALTER TABLE `classification_results`
+  ADD CONSTRAINT `classification_results_ibfk_1` FOREIGN KEY (`title_id`) REFERENCES `thesis_titles` (`id`),
+  ADD CONSTRAINT `classification_results_ibfk_2` FOREIGN KEY (`knn_prediction_id`) REFERENCES `categories` (`id`),
+  ADD CONSTRAINT `classification_results_ibfk_3` FOREIGN KEY (`dt_prediction_id`) REFERENCES `categories` (`id`);
+
+--
 -- Ketidakleluasaan untuk tabel `keyword_analysis`
 --
 ALTER TABLE `keyword_analysis`
+  ADD CONSTRAINT `fk_keyword_upload_file` FOREIGN KEY (`upload_file_id`) REFERENCES `uploaded_files` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `keyword_analysis_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`);
+
+--
+-- Ketidakleluasaan untuk tabel `model_performances`
+--
+ALTER TABLE `model_performances`
+  ADD CONSTRAINT `fk_model_perf_upload_file` FOREIGN KEY (`upload_file_id`) REFERENCES `uploaded_files` (`id`) ON DELETE SET NULL;
 
 --
 -- Ketidakleluasaan untuk tabel `predictions`
@@ -249,6 +300,7 @@ ALTER TABLE `predictions`
 -- Ketidakleluasaan untuk tabel `thesis_titles`
 --
 ALTER TABLE `thesis_titles`
+  ADD CONSTRAINT `fk_thesis_upload_file` FOREIGN KEY (`upload_file_id`) REFERENCES `uploaded_files` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `thesis_titles_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`);
 COMMIT;
 
