@@ -274,11 +274,6 @@ try {
         </div>
     </div>
 
-    <div class="bg-pattern text-center d-none d-md-block">
-        <h1 class="display-4 fw-bold text-white mb-0">Sistem Klasifikasi Judul Skripsi</h1>
-        <p class="lead text-white-50">Powered by IndoBERT & Machine Learning</p>
-    </div>
-
     <div class="container">
         <div class="card mb-4 fade-in">
             <div class="card-header">

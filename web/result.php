@@ -374,11 +374,6 @@ if ($dbStatus) {
     </style>
 </head>
 <body>
-    <div class="bg-pattern text-center d-none d-md-block">
-        <h1 class="display-4 fw-bold text-white mb-0">Hasil Klasifikasi Judul Skripsi</h1>
-        <p class="lead text-white-50">Analisis dan Perbandingan Model Machine Learning</p>
-    </div>
-
     <div class="container">
         <!-- Tampilan ketika tidak ada data -->
         <div id="noData" class="card fade-in" style="<?php echo (empty($results)) ? '' : 'display: none;'; ?>">
