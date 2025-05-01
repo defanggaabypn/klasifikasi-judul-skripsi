@@ -19,8 +19,9 @@ project/
 │   ├── composer.lock
 │   ├── config.php
 │   ├── databse_config.php
+│   ├── delete_history.php        
 │   ├── export.php
-        history.php
+|   |__ history.php
 │   ├── index.php
 │   ├── install.php
 │   ├── result.php
