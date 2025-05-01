@@ -16,6 +16,19 @@ try {
     $dbStatus = false;
 }
 
+// Tampilkan pesan jika ada
+if (isset($_GET['success']) && isset($_GET['message'])) {
+    $success = $_GET['success'] == '1';
+    $message = urldecode($_GET['message']);
+    $alertClass = $success ? 'alert-success' : 'alert-danger';
+    $icon = $success ? 'check-circle' : 'exclamation-triangle';
+    
+    echo '<div class="alert ' . $alertClass . ' alert-dismissible fade show mb-4" role="alert">
+            <i class="bi bi-' . $icon . '-fill me-2"></i>' . htmlspecialchars($message) . '
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>';
+}
+
 // Ambil daftar file yang sudah diupload
 $uploadedFiles = [];
 if ($dbStatus) {
@@ -161,6 +174,19 @@ if ($dbStatus) {
                     </ol>
                 </nav>
                 
+                <!-- Tampilkan pesan jika ada -->
+                <?php if (isset($_GET['success']) && isset($_GET['message'])): 
+                    $success = $_GET['success'] == '1';
+                    $message = urldecode($_GET['message']);
+                    $alertClass = $success ? 'alert-success' : 'alert-danger';
+                    $icon = $success ? 'check-circle' : 'exclamation-triangle';
+                ?>
+                <div class="alert <?= $alertClass ?> alert-dismissible fade show mb-3" role="alert">
+                    <i class="bi bi-<?= $icon ?>-fill me-2"></i><?= htmlspecialchars($message) ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                <?php endif; ?>
+                
                 <!-- Database Status -->
                 <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.2s">
                     <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
@@ -264,6 +290,12 @@ if ($dbStatus) {
                                                         <a href="export.php?type=pdf&id=<?= $file['id'] ?>" class="btn btn-sm btn-danger">
                                                             <i class="bi bi-file-pdf"></i> PDF
                                                         </a>
+                                                        <!-- Tombol Delete -->
+                                                        <button type="button" class="btn btn-sm btn-danger delete-btn" 
+                                                            data-id="<?= $file['id'] ?>" 
+                                                            data-filename="<?= htmlspecialchars($file['original_filename']) ?>">
+                                                            <i class="bi bi-trash"></i> Hapus
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </tr>
@@ -293,6 +325,26 @@ if ($dbStatus) {
         </div>
     </div>
     
+    <!-- Modal Konfirmasi Hapus -->
+    <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="deleteModalLabel">Konfirmasi Hapus</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i> Anda yakin ingin menghapus file <strong id="deleteFileName"></strong>?</p>
+                    <p class="text-danger mb-0">Semua data prediksi terkait file ini juga akan dihapus. Tindakan ini tidak dapat dibatalkan.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <a href="#" id="confirmDelete" class="btn btn-danger">Hapus</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -301,6 +353,27 @@ if ($dbStatus) {
             animatedElements.forEach((element, index) => {
                 element.style.animationDelay = (index * 0.1) + 's';
             });
+            
+            // Script untuk modal delete
+            const deleteButtons = document.querySelectorAll('.delete-btn');
+            
+            if (deleteButtons.length > 0) {
+                const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+                
+                deleteButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const id = this.getAttribute('data-id');
+                        const filename = this.getAttribute('data-filename');
+                        
+                        // Set nilai ke dalam modal
+                        document.getElementById('deleteFileName').textContent = filename;
+                        document.getElementById('confirmDelete').href = 'delete_history.php?id=' + id;
+                        
+                        // Tampilkan modal
+                        deleteModal.show();
+                    });
+                });
+            }
         });
     </script>
 </body>
