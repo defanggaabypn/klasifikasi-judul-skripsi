@@ -16,7 +16,7 @@ class Exporter {
     }
     
     // Export hasil ke Excel
-    public function exportToExcel($predictionData, $filename = 'hasil_klasifikasi.xlsx') {
+    public function exportToExcel($predictionData, $filename = 'hasil_klasifikasi.xlsx', $upload_file_id = null) {
         // Buat spreadsheet baru
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -102,8 +102,22 @@ class Exporter {
         $statSheet->setCellValue('B3', 'Akurasi');
         $statSheet->getStyle('A3:B3')->applyFromArray($headerStyle);
         
-        // Ambil statistik akurasi dari database
-        $modelStats = $this->database->fetchAll("SELECT model_name, accuracy FROM model_performances ORDER BY training_date DESC LIMIT 2");
+        // Ambil statistik akurasi dari database berdasarkan upload_file_id jika ada
+        if ($upload_file_id) {
+            $modelStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 WHERE upload_file_id = ? 
+                 ORDER BY training_date DESC", 
+                [$upload_file_id]
+            );
+        } else {
+            // Gunakan statistik global jika tidak ada upload_file_id spesifik
+            $modelStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 ORDER BY training_date DESC 
+                 LIMIT 2"
+            );
+        }
         
         $row = 4;
         foreach ($modelStats as $stat) {
@@ -126,7 +140,7 @@ class Exporter {
     }
     
     // Export hasil ke PDF
-    public function exportToPDF($predictionData, $filename = 'hasil_klasifikasi.pdf') {
+    public function exportToPDF($predictionData, $filename = 'hasil_klasifikasi.pdf', $upload_file_id = null) {
         // Inisialisasi mPDF
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
@@ -143,8 +157,23 @@ class Exporter {
         $stylesheet = file_get_contents('assets/css/pdf-style.css');
         $mpdf->WriteHTML($stylesheet, \Mpdf\HTMLParserMode::HEADER_CSS);
         
-        // Ambil statistik akurasi dari database
-        $modelStats = $this->database->fetchAll("SELECT model_name, accuracy FROM model_performances ORDER BY training_date DESC LIMIT 2");
+        // Ambil statistik akurasi dari database berdasarkan upload_file_id jika ada
+        if ($upload_file_id) {
+            $modelStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 WHERE upload_file_id = ? 
+                 ORDER BY training_date DESC", 
+                [$upload_file_id]
+            );
+        } else {
+            // Gunakan statistik global jika tidak ada upload_file_id spesifik
+            $modelStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 ORDER BY training_date DESC 
+                 LIMIT 2"
+            );
+        }
+        
         $knn_acc = 0;
         $dt_acc = 0;
         

@@ -369,16 +369,7 @@ $modelPerformance = $database->fetchAll("
                                         <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
                                     </a>
                                 </li>
-                                <li class="nav-item dropdown">
-                                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
-                                       data-bs-toggle="dropdown" aria-expanded="false">
-                                        <i class="bi bi-download"></i> Export
-                                    </a>
-                                    <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
-                                        <li><a class="dropdown-item" href="export.php?type=excel">Excel</a></li>
-                                        <li><a class="dropdown-item" href="export.php?type=pdf">PDF</a></li>
-                                    </ul>
-                                </li>
+
                             </ul>
                             <!-- API Status Indicator -->
                             <div class="ms-auto d-flex align-items-center">

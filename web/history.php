@@ -16,19 +16,6 @@ try {
     $dbStatus = false;
 }
 
-// Tampilkan pesan jika ada
-if (isset($_GET['success']) && isset($_GET['message'])) {
-    $success = $_GET['success'] == '1';
-    $message = urldecode($_GET['message']);
-    $alertClass = $success ? 'alert-success' : 'alert-danger';
-    $icon = $success ? 'check-circle' : 'exclamation-triangle';
-    
-    echo '<div class="alert ' . $alertClass . ' alert-dismissible fade show mb-4" role="alert">
-            <i class="bi bi-' . $icon . '-fill me-2"></i>' . htmlspecialchars($message) . '
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>';
-}
-
 // Ambil daftar file yang sudah diupload
 $uploadedFiles = [];
 if ($dbStatus) {

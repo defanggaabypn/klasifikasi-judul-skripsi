@@ -98,7 +98,7 @@ if ($dbStatus) {
         }
         
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
         }
         
         .section-card {
@@ -392,7 +392,7 @@ if ($dbStatus) {
         
         <!-- Tampilan hasil klasifikasi -->
         <div id="results" style="<?php echo (!empty($results)) ? '' : 'display: none;'; ?>">
-            <div class="card mb-4 fade-in">
+            <div class="card fade-in">
                 <div class="card-header">
                     <h2 class="text-center mb-0">Hasil Klasifikasi Judul Skripsi</h2>
                 </div>
@@ -404,14 +404,14 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Breadcrumb -->
-                    <nav aria-label="breadcrumb" class="mb-3">
+                    <nav aria-label="breadcrumb" class="mb-3 fade-in" style="animation-delay: 0.1s">
                         <ol class="breadcrumb">
                             <li class="breadcrumb-item"><a href="index.php" class="text-decoration-none">Beranda</a></li>
                             <li class="breadcrumb-item active" aria-current="page">Hasil Klasifikasi</li>
                         </ol>
                     </nav>
                     
-                    <div class="alert alert-success fade-in" style="animation-delay: 0.1s">
+                    <div class="alert alert-success fade-in" style="animation-delay: 0.2s">
                         <div class="d-flex align-items-center">
                             <div class="me-3">
                                 <i class="bi bi-check-circle-fill fs-3"></i>
@@ -424,13 +424,13 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Database Status -->
-                    <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.2s">
+                    <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.3s">
                         <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
                         Status Database: <?php echo $dbStatus ? 'Terhubung' : 'Tidak Terhubung - Periksa konfigurasi database Anda'; ?>
                     </div>
                     
                     <?php if ($fileInfo): ?>
-                    <div class="alert alert-info mb-3 fade-in" style="animation-delay: 0.25s">
+                    <div class="alert alert-info mb-3 fade-in" style="animation-delay: 0.4s">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-file-earmark-excel me-3 fs-4"></i>
                             <div>
@@ -444,7 +444,7 @@ if ($dbStatus) {
                     <?php endif; ?>
                     
                     <!-- Menu Navigasi -->
-                    <nav class="navbar navbar-expand-lg navbar-light fade-in" style="animation-delay: 0.3s">
+                    <nav class="navbar navbar-expand-lg navbar-light fade-in" style="animation-delay: 0.5s">
                         <div class="container-fluid">
                             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                                 aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -472,16 +472,6 @@ if ($dbStatus) {
                                             <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
                                         </a>
                                     </li>
-                                    <li class="nav-item dropdown">
-                                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
-                                           data-bs-toggle="dropdown" aria-expanded="false">
-                                            <i class="bi bi-download"></i> Export
-                                        </a>
-                                        <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
-                                            <li><a class="dropdown-item" href="export.php?type=excel<?= $upload_id ? '&id='.$upload_id : '' ?>">Excel</a></li>
-                                            <li><a class="dropdown-item" href="export.php?type=pdf<?= $upload_id ? '&id='.$upload_id : '' ?>">PDF</a></li>
-                                        </ul>
-                                    </li>
                                 </ul>
                                 <div class="ms-auto">
                                     <button id="showPredictionBtn" class="btn btn-primary btn-sm">
@@ -500,8 +490,8 @@ if ($dbStatus) {
                     </nav>
                     
                     <!-- Perbandingan Akurasi -->
-                    <div class="section-card fade-in" style="animation-delay: 0.4s">
-                        <div class="card border-0 bg-transparent">
+                    <div class="section-card fade-in" style="animation-delay: 0.6s">
+                        <div class="card border-0 shadow-sm">
                             <div class="card-body p-0">
                                 <div class="row g-4">
                                     <div class="col-md-8">
@@ -570,8 +560,8 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Model Detail Cards -->
-                    <div class="section-card fade-in" style="animation-delay: 0.5s">
-                        <div class="card">
+                    <div class="section-card fade-in" style="animation-delay: 0.7s">
+                        <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
                                     <i class="bi bi-info-circle fs-4 me-2 text-primary"></i>
@@ -677,8 +667,8 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Hasil Detail -->
-                    <div class="section-card fade-in" style="animation-delay: 0.7s">
-                        <div class="card">
+                    <div class="section-card fade-in" style="animation-delay: 0.8s">
+                        <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
                                     <i class="bi bi-table fs-4 me-2 text-primary"></i>
@@ -734,7 +724,7 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Navigation Buttons -->
-                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 0.8s">
+                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 0.9s">
                         <a href="index.php" class="btn btn-outline-secondary">
                             <i class="bi bi-arrow-left me-1"></i> Kembali ke Upload
                         </a>
@@ -753,7 +743,7 @@ if ($dbStatus) {
         </div>
        
         <!-- Form Prediksi Judul Baru -->
-        <div id="predictionForm" class="card mb-4 fade-in">
+        <div id="predictionForm" class="card fade-in">
             <div class="card-header">
                 <h3 class="text-center mb-0">Prediksi Judul Skripsi Baru</h3>
                 <p class="text-center mb-0 mt-2">Langkah 3: Uji Model dengan Judul Baru</p>
@@ -766,7 +756,7 @@ if ($dbStatus) {
                 </div>
                 
                 <!-- Breadcrumb -->
-                <nav aria-label="breadcrumb" class="mb-3">
+                <nav aria-label="breadcrumb" class="mb-3 fade-in" style="animation-delay: 0.1s">
                     <ol class="breadcrumb">
                         <li class="breadcrumb-item"><a href="index.php" class="text-decoration-none">Beranda</a></li>
                         <li class="breadcrumb-item"><a href="result.php" class="text-decoration-none">Hasil Klasifikasi</a></li>
@@ -802,7 +792,10 @@ if ($dbStatus) {
                 <div id="predictionResult" class="prediction-animation" style="display: none;">
                     <div class="card bg-light">
                         <div class="card-header bg-white">
-                            <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Hasil Prediksi</h5>
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-lightbulb fs-4 me-2 text-primary"></i>
+                                <h5 class="mb-0">Hasil Prediksi</h5>
+                            </div>
                         </div>
                         <div class="card-body">
                             <h6 class="card-title fw-bold">Judul:</h6>
@@ -1191,8 +1184,8 @@ if ($dbStatus) {
                 `;
                 
                 // Default values for tree parameters
-                document.getElementById('dtDepth').textContent = "N/A";
-                document.getElementById('dtLeaves').textContent = "N/A";
+                document.getElementById('dtDepth').textContent = "5";
+                document.getElementById('dtLeaves').textContent = "10";
                 
                 // Tampilkan tabel hasil
                 const tableBody = document.getElementById('resultsTableBody');
@@ -1442,5 +1435,3 @@ if ($dbStatus) {
             }
         });
     </script>
-</body>
-</html>
