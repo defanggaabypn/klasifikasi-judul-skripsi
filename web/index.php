@@ -44,7 +44,7 @@ try {
         }
         
         .container {
-            max-width: 800px;
+            max-width: 1200px;
         }
         
         #loading {
@@ -275,7 +275,7 @@ try {
     </div>
 
     <div class="container">
-        <div class="card mb-4 fade-in">
+        <div class="card fade-in">
             <div class="card-header">
                 <h2 class="text-center mb-0">Sistem Klasifikasi Judul Skripsi</h2>
             </div>
@@ -287,8 +287,15 @@ try {
                     <div class="step">3</div>
                 </div>
                 
+                <!-- Breadcrumb -->
+                <nav aria-label="breadcrumb" class="mb-3 fade-in" style="animation-delay: 0.1s">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item active" aria-current="page">Beranda</li>
+                    </ol>
+                </nav>
+                
                 <!-- Navigasi Menu -->
-                <nav class="navbar navbar-expand-lg navbar-light">
+                <nav class="navbar navbar-expand-lg navbar-light fade-in" style="animation-delay: 0.2s">
                     <div class="container-fluid">
                         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                             aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -312,10 +319,10 @@ try {
                                     </a>
                                 </li>
                                 <li class="nav-item">
-                    <a class="nav-link" href="history.php">
-                        <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
-                    </a>
-                </li>
+                                    <a class="nav-link" href="history.php">
+                                        <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
+                                    </a>
+                                </li>
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
                                        data-bs-toggle="dropdown" aria-expanded="false">
@@ -339,7 +346,7 @@ try {
                 </nav>
                 
                 <!-- Database Status -->
-                <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.1s">
+                <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.3s">
                     <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
                     Status Database: <?php echo $dbStatus ? 'Terhubung' : 'Tidak Terhubung - Periksa konfigurasi database Anda'; ?>
                 </div>
@@ -347,7 +354,7 @@ try {
                 <?php
                 // Tampilkan pesan error jika ada
                 if (isset($_SESSION['error'])) {
-                    echo '<div class="alert alert-danger fade-in" style="animation-delay: 0.2s">';
+                    echo '<div class="alert alert-danger fade-in" style="animation-delay: 0.4s">';
                     echo '<i class="bi bi-exclamation-triangle-fill me-2"></i>'.$_SESSION['error'];
                     echo '</div>';
                     unset($_SESSION['error']);
@@ -355,7 +362,7 @@ try {
                 
                 // Tampilkan pesan sukses jika ada
                 if (isset($_SESSION['success'])) {
-                    echo '<div class="alert alert-success fade-in" style="animation-delay: 0.2s">';
+                    echo '<div class="alert alert-success fade-in" style="animation-delay: 0.4s">';
                     echo '<i class="bi bi-check-circle-fill me-2"></i>'.$_SESSION['success'];
                     echo '</div>';
                     unset($_SESSION['success']);
@@ -363,7 +370,7 @@ try {
                 ?>
                 
                 <!-- Alur Penggunaan -->
-                <div class="alert alert-info fade-in" style="animation-delay: 0.3s">
+                <div class="alert alert-info fade-in" style="animation-delay: 0.5s">
                     <i class="bi bi-info-circle-fill me-2"></i>
                     <strong>Alur Penggunaan:</strong> 
                     <ol class="mb-0 ms-4">
@@ -373,19 +380,22 @@ try {
                     </ol>
                 </div>
                 
-                <div class="alert alert-info fade-in" style="animation-delay: 0.4s">
+                <div class="alert alert-info fade-in" style="animation-delay: 0.6s">
                     <i class="bi bi-info-circle-fill me-2"></i>
                     <strong>Petunjuk:</strong> Upload file Excel (.xlsx) yang berisi judul-judul skripsi. Sistem akan mengklasifikasikan judul ke dalam kategori yang sesuai menggunakan model IndoBERT dan algoritma machine learning.
                 </div>
                 
-                <div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.5s">
+                <div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.7s">
                     <div class="card-header bg-white">
-                        <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Upload File</h5>
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-upload fs-4 me-2 text-primary"></i>
+                            <h5 class="mb-0">Upload File</h5>
+                        </div>
                     </div>
                     <div class="card-body">
                         <form id="uploadForm">
                             <div class="mb-3">
-                                <label for="file" class="form-label">Pilih File Excel (.xlsx):</label>
+                                <label for="file" class="form-label fw-bold">Pilih File Excel (.xlsx):</label>
                                 <input type="file" name="file" id="file" class="form-control" accept=".xlsx" required>
                                 <div class="form-text">Ukuran maksimum file: <?php echo MAX_UPLOAD_SIZE; ?>MB</div>
                             </div>
@@ -409,9 +419,12 @@ $totalPredictions = $database->fetch("SELECT COUNT(*) as count FROM predictions"
 
 if ($totalTitles && $totalTitles['count'] > 0): 
 ?>
-<div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.6s">
+<div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.8s">
     <div class="card-header bg-white">
-        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Statistik Database</h5>
+        <div class="d-flex align-items-center">
+            <i class="bi bi-graph-up fs-4 me-2 text-primary"></i>
+            <h5 class="mb-0">Statistik Database</h5>
+        </div>
     </div>
     <div class="card-body">
         <div class="row text-center g-3">
@@ -447,9 +460,12 @@ if ($totalTitles && $totalTitles['count'] > 0):
 </div>
 <?php endif; ?>
                 
-                <div class="card mb-4 fade-in" style="animation-delay: 0.7s">
+                <div class="card fade-in" style="animation-delay: 0.9s">
                     <div class="card-header bg-white">
-                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Informasi Sistem</h5>
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-info-circle fs-4 me-2 text-primary"></i>
+                            <h5 class="mb-0">Informasi Sistem</h5>
+                        </div>
                     </div>
                     <div class="card-body">
                         <p>Sistem ini akan mengklasifikasikan judul skripsi ke dalam kategori:</p>
