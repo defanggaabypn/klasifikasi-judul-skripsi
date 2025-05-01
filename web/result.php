@@ -2,7 +2,7 @@
 require_once 'config.php';
 require_once 'database_config.php';
 
-// Inisialisasi database jika data dari database akan digunakan
+// Inisialisasi database
 $database = new Database();
 $connection = $database->getConnection();
 
@@ -14,6 +14,59 @@ try {
 } catch (Exception $e) {
     $dbStatus = false;
 }
+
+// Ambil data dari database
+$results = [];
+$upload_id = isset($_GET['upload_id']) ? intval($_GET['upload_id']) : null;
+$fileInfo = null;
+
+if ($dbStatus) {
+    if ($upload_id) {
+        // Ambil hasil berdasarkan upload_id
+        $results = $database->fetchAll("
+            SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   p.confidence, p.prediction_date
+            FROM predictions p
+            LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+            WHERE p.upload_file_id = ?
+            ORDER BY p.id DESC
+        ", [$upload_id]);
+        
+        // Dapatkan info file
+        $fileInfo = $database->fetch("
+            SELECT id, original_filename, file_size, upload_date
+            FROM uploaded_files
+            WHERE id = ?
+        ", [$upload_id]);
+    } else {
+        // Ambil 100 hasil terbaru
+        $results = $database->fetchAll("
+            SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   p.confidence, p.prediction_date
+            FROM predictions p
+            LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+            ORDER BY p.prediction_date DESC
+            LIMIT 100
+        ");
+    }
+
+    // Hitung statistik
+    $totalCount = count($results);
+    $correctKNN = 0;
+    $correctDT = 0;
+
+    foreach ($results as $row) {
+        if ($row['actual'] == $row['knn_pred']) $correctKNN++;
+        if ($row['actual'] == $row['dt_pred']) $correctDT++;
+    }
+
+    $knnAccuracy = $totalCount > 0 ? ($correctKNN / $totalCount) * 100 : 0;
+    $dtAccuracy = $totalCount > 0 ? ($correctDT / $totalCount) * 100 : 0;
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -21,93 +74,136 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hasil Klasifikasi Judul Skripsi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        :root {
+          --primary-color: #4361ee;
+          --secondary-color: #3f37c9;
+          --success-color: #4cc9f0;
+          --info-color: #4895ef;
+          --warning-color: #f72585;
+          --light-color: #f8f9fa;
+          --dark-color: #212529;
+        }
+        
         body {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #f0f2f5;
             padding-top: 50px;
             padding-bottom: 50px;
-            background-color: #f8f9fa;
         }
+        
         .container {
             max-width: 1000px;
         }
+        
         .section-card {
             margin-bottom: 30px;
         }
+        
         .img-container {
             text-align: center;
             margin-bottom: 20px;
         }
+        
         .img-container img {
             max-width: 100%;
             height: auto;
-            border-radius: 5px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
+        
         #noData {
             display: none;
         }
+        
         #results {
             display: none;
         }
+        
         #predictionForm {
             display: none;
         }
+        
         #loadingPredict {
             display: none;
         }
+        
         .card {
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.05);
             border: none;
-            border-radius: 10px;
+            transition: transform 0.3s, box-shadow 0.3s;
             overflow: hidden;
+            margin-bottom: 30px;
         }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.1);
+        }
+        
         .card-header {
             border-bottom: none;
             padding: 20px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
         }
+        
         .badge-large {
             font-size: 1rem;
             padding: 0.5rem 0.7rem;
+            border-radius: 8px;
         }
+        
         .step-container {
             display: flex;
             justify-content: center;
-            margin: 30px 0;
+            margin: 40px 0;
         }
+        
         .step {
-            width: 30px;
-            height: 30px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             background-color: #dee2e6;
             color: #6c757d;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 30px;
+            margin: 0 40px;
             position: relative;
             font-weight: bold;
+            font-size: 18px;
         }
+        
         .step.active {
-            background-color: #0d6efd;
+            background-color: var(--primary-color);
             color: white;
         }
+        
         .step:not(:last-child):after {
             content: '';
             position: absolute;
-            width: 60px;
+            width: 80px;
             height: 2px;
             background-color: #dee2e6;
             top: 50%;
-            left: 30px;
+            left: 40px;
         }
+        
         .step.active:not(:last-child):after {
-            background-color: #0d6efd;
+            background-color: var(--primary-color);
         }
+        
         .prediction-animation {
             animation: fadeInUp 0.5s ease-out;
         }
+        
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -118,40 +214,179 @@ try {
                 transform: translateY(0);
             }
         }
-        .table th, .table td {
-            vertical-align: middle;
+        
+        .fade-in {
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
         }
-        .highlight-row {
-            background-color: rgba(13, 110, 253, 0.1);
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        .accordion-button:not(.collapsed) {
-            background-color: rgba(13, 110, 253, 0.1);
-            color: #0d6efd;
+        
+        .results-table {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
         }
+        
+        .results-table thead th {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            color: var(--dark-color);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+            border: none;
+        }
+        
+        .results-table tbody tr {
+            transition: all 0.2s;
+        }
+        
+        .results-table tbody tr:hover {
+            background-color: rgba(67, 97, 238, 0.05);
+            transform: scale(1.01);
+        }
+        
+        .results-table .badge {
+            padding: 6px 10px;
+            font-weight: 500;
+        }
+        
+        .navbar {
+            border-radius: 10px;
+            padding: 10px 15px;
+            margin-bottom: 25px;
+            background-color: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 15px;
+        }
+        
+        .btn {
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background: var(--secondary-color);
+            border-color: var(--secondary-color);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .bg-pattern {
+            background-color: var(--primary-color);
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            padding: 50px 0;
+            margin-bottom: 30px;
+            border-radius: 0 0 20px 20px;
+        }
+        
         .model-detail-card {
             margin-bottom: 20px;
-            border-left: 4px solid;
+            position: relative;
+            overflow: hidden;
         }
+        
+        .model-icon {
+            position: absolute;
+            right: -20px;
+            bottom: -20px;
+            font-size: 8rem;
+            opacity: 0.05;
+            transform: rotate(15deg);
+        }
+        
         .knn-border {
-            border-left-color: #0d6efd;
+            border-left: 4px solid var(--primary-color);
         }
+        
         .dt-border {
-            border-left-color: #198754;
+            border-left: 4px solid #198754;
         }
+        
         .metric-pill {
             font-size: 0.85rem;
             padding: 0.25rem 0.5rem;
+            border-radius: 20px;
+        }
+        
+        .highlight-row {
+            background-color: rgba(13, 110, 253, 0.1);
+        }
+        
+        .input-group {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .input-group-text {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+        }
+        
+        .filter-btn.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 15px;
+            }
+            
+            .card-header {
+                padding: 15px;
+            }
+            
+            .step {
+                width: 30px;
+                height: 30px;
+                margin: 0 20px;
+                font-size: 14px;
+            }
+            
+            .step:not(:last-child):after {
+                width: 40px;
+                left: 30px;
+            }
+            
+            .badge-large {
+                font-size: 0.85rem;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="bg-pattern text-center d-none d-md-block">
+        <h1 class="display-4 fw-bold text-white mb-0">Hasil Klasifikasi Judul Skripsi</h1>
+        <p class="lead text-white-50">Analisis dan Perbandingan Model Machine Learning</p>
+    </div>
+
     <div class="container">
         <!-- Tampilan ketika tidak ada data -->
-        <div id="noData" class="card">
-            <div class="card-header bg-warning text-dark">
-                <h3 class="text-center"><i class="bi bi-exclamation-triangle me-2"></i>Data Tidak Ditemukan</h3>
+        <div id="noData" class="card fade-in" style="<?php echo (empty($results)) ? '' : 'display: none;'; ?>">
+            <div class="card-header">
+                <h3 class="text-center mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Data Tidak Ditemukan</h3>
             </div>
             <div class="card-body text-center">
+                <img src="https://cdn-icons-png.flaticon.com/512/6134/6134065.png" alt="No Data" class="img-fluid mb-4" style="max-width: 150px;">
                 <p class="mb-4">Tidak ada hasil klasifikasi yang tersedia.</p>
                 <p class="mb-4">Silakan upload file Excel terlebih dahulu untuk melihat hasil klasifikasi.</p>
                 <a href="index.php" class="btn btn-primary">
@@ -161,9 +396,9 @@ try {
         </div>
         
         <!-- Tampilan hasil klasifikasi -->
-        <div id="results">
-            <div class="card mb-4">
-                <div class="card-header bg-primary text-white">
+        <div id="results" style="<?php echo (!empty($results)) ? '' : 'display: none;'; ?>">
+            <div class="card mb-4 fade-in">
+                <div class="card-header">
                     <h2 class="text-center mb-0">Hasil Klasifikasi Judul Skripsi</h2>
                 </div>
                 <div class="card-body">
@@ -176,26 +411,46 @@ try {
                     <!-- Breadcrumb -->
                     <nav aria-label="breadcrumb" class="mb-3">
                         <ol class="breadcrumb">
-                            <li class="breadcrumb-item"><a href="index.php">Beranda</a></li>
+                            <li class="breadcrumb-item"><a href="index.php" class="text-decoration-none">Beranda</a></li>
                             <li class="breadcrumb-item active" aria-current="page">Hasil Klasifikasi</li>
                         </ol>
                     </nav>
                     
-                    <div class="alert alert-success">
-                        <i class="bi bi-check-circle-fill me-2"></i>
-                        <strong>Berhasil!</strong> Klasifikasi telah selesai diproses.
+                    <div class="alert alert-success fade-in" style="animation-delay: 0.1s">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <i class="bi bi-check-circle-fill fs-3"></i>
+                            </div>
+                            <div>
+                                <strong>Berhasil!</strong> Klasifikasi telah selesai diproses.
+                                <div class="text-success small">Model machine learning telah melakukan prediksi kategori pada judul-judul skripsi.</div>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Database Status -->
-                    <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3">
+                    <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.2s">
                         <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
                         Status Database: <?php echo $dbStatus ? 'Terhubung' : 'Tidak Terhubung - Periksa konfigurasi database Anda'; ?>
                     </div>
                     
+                    <?php if ($fileInfo): ?>
+                    <div class="alert alert-info mb-3 fade-in" style="animation-delay: 0.25s">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-file-earmark-excel me-3 fs-4"></i>
+                            <div>
+                                <strong>Informasi File:</strong>
+                                <p class="mb-0">Nama: <?= $fileInfo['original_filename'] ?>, 
+                                Ukuran: <?= number_format($fileInfo['file_size'] / 1024, 2) ?> KB, 
+                                Diupload: <?= date('d/m/Y H:i', strtotime($fileInfo['upload_date'])) ?></p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                    
                     <!-- Menu Navigasi -->
-                    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+                    <nav class="navbar navbar-expand-lg navbar-light fade-in" style="animation-delay: 0.3s">
                         <div class="container-fluid">
-                            <span class="navbar-brand">Menu:</span>
                             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                                 aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                                 <span class="navbar-toggler-icon"></span>
@@ -213,8 +468,13 @@ try {
                                         </a>
                                     </li>
                                     <li class="nav-item">
-                                        <a class="nav-link" href="visualisasi.php">
+                                        <a class="nav-link" href="visualisasi.php<?= $upload_id ? '?upload_id='.$upload_id : '' ?>">
                                             <i class="bi bi-bar-chart"></i> Visualisasi Data
+                                        </a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" href="history.php">
+                                            <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
                                         </a>
                                     </li>
                                     <li class="nav-item dropdown">
@@ -223,8 +483,8 @@ try {
                                             <i class="bi bi-download"></i> Export
                                         </a>
                                         <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
-                                            <li><a class="dropdown-item" href="export.php?type=excel">Excel</a></li>
-                                            <li><a class="dropdown-item" href="export.php?type=pdf">PDF</a></li>
+                                            <li><a class="dropdown-item" href="export.php?type=excel<?= $upload_id ? '&id='.$upload_id : '' ?>">Excel</a></li>
+                                            <li><a class="dropdown-item" href="export.php?type=pdf<?= $upload_id ? '&id='.$upload_id : '' ?>">PDF</a></li>
                                         </ul>
                                     </li>
                                 </ul>
@@ -235,75 +495,78 @@ try {
                                 </div>
                                 <!-- API Status Indicator -->
                                 <div class="ms-2 d-flex align-items-center">
-                                    <small class="badge rounded-pill bg-light text-dark me-2" id="apiStatus">
+                                    <span class="badge rounded-pill bg-light text-dark me-2" id="apiStatus">
                                         <i class="bi bi-circle-fill text-secondary me-1" style="font-size: 0.5rem;"></i>
                                         API Status
-                                    </small>
+                                    </span>
                                 </div>
                             </div>
                         </div>
                     </nav>
                     
                     <!-- Perbandingan Akurasi -->
-                    <div class="section-card">
-                        <div class="card border">
-                            <div class="card-header bg-light">
-                                <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Perbandingan Akurasi</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
+                    <div class="section-card fade-in" style="animation-delay: 0.4s">
+                        <div class="card border-0 bg-transparent">
+                            <div class="card-body p-0">
+                                <div class="row g-4">
                                     <div class="col-md-8">
-                                        <div class="img-container">
-                                            <canvas id="accuracyChart" height="250"></canvas>
+                                        <div class="card h-100">
+                                            <div class="card-header bg-white">
+                                                <div class="d-flex align-items-center">
+                                                    <i class="bi bi-bar-chart-line fs-4 me-2 text-primary"></i>
+                                                    <h5 class="mb-0">Perbandingan Akurasi</h5>
+                                                </div>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="img-container">
+                                                    <canvas id="accuracyChart" height="250"></canvas>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="col-md-4">
                                         <div class="card h-100">
+                                            <div class="card-header bg-white">
+                                                <div class="d-flex align-items-center">
+                                                    <i class="bi bi-award fs-4 me-2 text-primary"></i>
+                                                    <h5 class="mb-0">Hasil Akurasi</h5>
+                                                </div>
+                                            </div>
                                             <div class="card-body">
-                                                <h5 class="card-title">Hasil Akurasi:</h5>
-                                                <div class="mt-4">
-                                                    <div class="mb-3">
-                                                        <div class="d-flex justify-content-between">
-                                                            <span>KNN</span>
+                                                <div class="mt-2">
+                                                    <div class="mb-4">
+                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                            <span class="fw-bold">KNN</span>
                                                             <span id="knnAccuracy" class="badge bg-primary badge-large">0%</span>
                                                         </div>
-                                                        <div class="progress mt-2">
-                                                            <div id="knnProgress" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                                        <div class="progress" style="height: 10px;">
+                                                            <div id="knnProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
                                                         </div>
                                                     </div>
-                                                    <div class="mb-3">
-                                                        <div class="d-flex justify-content-between">
-                                                            <span>Decision Tree</span>
+                                                    <div class="mb-4">
+                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                            <span class="fw-bold">Decision Tree</span>
                                                             <span id="dtAccuracy" class="badge bg-success badge-large">0%</span>
                                                         </div>
-                                                        <div class="progress mt-2">
-                                                            <div id="dtProgress" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                                                        <div class="progress" style="height: 10px;">
+                                                            <div id="dtProgress" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%"></div>
                                                         </div>
                                                     </div>
                                                 </div>
                                                 
                                                 <div class="mt-4">
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <span class="text-muted small">Model dengan performa terbaik:</span>
-                                                    </div>
-                                                    <div class="alert alert-info py-2 mt-2 mb-0">
+                                                    <h6 class="text-muted fw-bold mb-3">Model Terbaik:</h6>
+                                                    <div class="alert alert-primary py-3">
                                                         <div class="d-flex align-items-center">
-                                                            <i class="bi bi-trophy me-2"></i>
-                                                            <strong id="bestModel">-</strong>
+                                                            <i class="bi bi-trophy-fill fs-4 me-3"></i>
+                                                            <div>
+                                                                <strong id="bestModel" class="fs-5">-</strong>
+                                                                <div class="small">Akurasi tertinggi</div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Perbandingan Metrik -->
-                                <div class="row mt-4">
-                                    <div class="col-12">
-                                        <h6><i class="bi bi-graph-up me-2"></i>Perbandingan Metrik Performance</h6>
-                                        <div class="img-container mt-3">
-                                            <img id="performanceComparisonImg" src="" alt="Perbandingan Metrik Performance" class="img-fluid">
                                         </div>
                                     </div>
                                 </div>
@@ -312,23 +575,33 @@ try {
                     </div>
                     
                     <!-- Model Detail Cards -->
-                    <div class="section-card">
-                        <div class="card border">
-                            <div class="card-header bg-light">
-                                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Detail Model</h5>
+                    <div class="section-card fade-in" style="animation-delay: 0.5s">
+                        <div class="card">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-info-circle fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Detail Model</h5>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <div class="row">
                                     <!-- KNN Detail Card -->
-                                    <div class="col-md-6">
-                                        <div class="card model-detail-card knn-border">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-primary">
-                                                    <i class="bi bi-bullseye me-2"></i>K-Nearest Neighbors
-                                                </h5>
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card model-detail-card knn-border h-100">
+                                            <div class="card-body position-relative">
+                                                <i class="bi bi-bullseye model-icon"></i>
+                                                <div class="d-flex align-items-center mb-3">
+                                                    <div class="me-3 bg-primary bg-opacity-10 p-3 rounded-circle">
+                                                        <i class="bi bi-bullseye fs-3 text-primary"></i>
+                                                    </div>
+                                                    <div>
+                                                        <h5 class="card-title mb-0 text-primary">K-Nearest Neighbors</h5>
+                                                        <div class="text-muted small">Algoritma berbasis jarak</div>
+                                                    </div>
+                                                </div>
                                                 <div id="knnDetailMetrics">
                                                     <div class="d-flex gap-2 mt-3 mb-2 flex-wrap">
-                                                        <span class="badge bg-primary metric-pill">
+                                                        <span class="badge bg-primary-subtle text-primary metric-pill">
                                                             <i class="bi bi-people me-1"></i>
                                                             n_neighbors: <span id="knnNeighbors">3</span>
                                                         </span>
@@ -339,7 +612,7 @@ try {
                                                     </div>
                                                     
                                                     <div class="table-responsive mt-3">
-                                                        <table class="table table-sm table-bordered">
+                                                        <table class="table table-sm table-bordered border-primary">
                                                             <thead class="table-primary">
                                                                 <tr>
                                                                     <th>Metric</th>
@@ -357,19 +630,26 @@ try {
                                     </div>
                                     
                                     <!-- Decision Tree Detail Card -->
-                                    <div class="col-md-6">
-                                        <div class="card model-detail-card dt-border">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-success">
-                                                    <i class="bi bi-diagram-3 me-2"></i>Decision Tree
-                                                </h5>
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card model-detail-card dt-border h-100">
+                                            <div class="card-body position-relative">
+                                                <i class="bi bi-diagram-3 model-icon"></i>
+                                                <div class="d-flex align-items-center mb-3">
+                                                    <div class="me-3 bg-success bg-opacity-10 p-3 rounded-circle">
+                                                        <i class="bi bi-diagram-3 fs-3 text-success"></i>
+                                                    </div>
+                                                    <div>
+                                                        <h5 class="card-title mb-0 text-success">Decision Tree</h5>
+                                                        <div class="text-muted small">Algoritma berbasis pohon keputusan</div>
+                                                    </div>
+                                                </div>
                                                 <div id="dtDetailMetrics">
                                                     <div class="d-flex gap-2 mt-3 mb-2 flex-wrap">
-                                                        <span class="badge bg-success metric-pill">
+                                                        <span class="badge bg-success-subtle text-success metric-pill">
                                                             <i class="bi bi-tree me-1"></i>
                                                             Depth: <span id="dtDepth">0</span>
                                                         </span>
-                                                        <span class="badge bg-success metric-pill">
+                                                        <span class="badge bg-success-subtle text-success metric-pill">
                                                             <i class="bi bi-journal me-1"></i>
                                                             Leaves: <span id="dtLeaves">0</span>
                                                         </span>
@@ -380,7 +660,7 @@ try {
                                                     </div>
                                                     
                                                     <div class="table-responsive mt-3">
-                                                        <table class="table table-sm table-bordered">
+                                                        <table class="table table-sm table-bordered border-success">
                                                             <thead class="table-success">
                                                                 <tr>
                                                                     <th>Metric</th>
@@ -401,66 +681,26 @@ try {
                         </div>
                     </div>
                     
-                    <!-- Confusion Matrix -->
-                    <div class="section-card">
-                        <div class="card border">
-                            <div class="card-header bg-light">
-                                <h5 class="mb-0"><i class="bi bi-grid-3x3 me-2"></i>Confusion Matrix</h5>
-                            </div>
-                            <div class="card-body">
-                                <p>
-                                    <small class="text-muted">
-                                        <i class="bi bi-info-circle me-1"></i>
-                                        Confusion matrix menunjukkan perbandingan antara label sebenarnya (actual) dan hasil prediksi model.
-                                    </small>
-                                </p>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="card">
-                                            <div class="card-header bg-primary text-white">
-                                                <h5 class="mb-0">KNN</h5>
-                                            </div>
-                                            <div class="card-body">
-                                                <div class="img-container" id="knnMatrix">
-                                                    <!-- Confusion Matrix KNN akan ditampilkan di sini -->
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="card">
-                                            <div class="card-header bg-success text-white">
-                                                <h5 class="mb-0">Decision Tree</h5>
-                                            </div>
-                                            <div class="card-body">
-                                                <div class="img-container" id="dtMatrix">
-                                                    <!-- Confusion Matrix Decision Tree akan ditampilkan di sini -->
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
+                    <!-- Hasil Detail -->
+                    <div class="section-card fade-in" style="animation-delay: 0.7s">
+                        <div class="card">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-table fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Detail Hasil Prediksi</h5>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Hasil Detail -->
-                    <div class="section-card">
-                        <div class="card border">
-                            <div class="card-header bg-light">
-                                <h5 class="mb-0"><i class="bi bi-table me-2"></i>Detail Hasil Prediksi</h5>
-                            </div>
                             <div class="card-body">
-                                <div class="row mb-3">
-                                    <div class="col-md-6">
+                                <div class="row mb-4">
+                                    <div class="col-md-6 mb-3 mb-md-0">
                                         <div class="input-group">
                                             <span class="input-group-text"><i class="bi bi-search"></i></span>
                                             <input type="text" id="tableSearch" class="form-control" placeholder="Cari judul skripsi...">
                                         </div>
                                     </div>
-                                    <div class="col-md-6 text-end">
+                                    <div class="col-md-6 text-md-end">
                                         <div class="btn-group" role="group">
-                                            <button type="button" class="btn btn-outline-primary filter-btn" data-filter="all">Semua</button>
+                                            <button type="button" class="btn btn-outline-primary filter-btn active" data-filter="all">Semua</button>
                                             <button type="button" class="btn btn-outline-success filter-btn" data-filter="correct">Benar</button>
                                             <button type="button" class="btn btn-outline-danger filter-btn" data-filter="incorrect">Salah</button>
                                         </div>
@@ -468,15 +708,15 @@ try {
                                 </div>
                                 
                                 <div class="table-responsive">
-                                    <table class="table table-hover table-bordered" id="resultsTable">
-                                        <thead class="table-dark">
+                                    <table class="table table-hover results-table" id="resultsTable">
+                                        <thead>
                                             <tr>
-                                                <th width="5%">No</th>
+                                                <th width="5%" class="text-center">No</th>
                                                 <th width="45%">Judul Skripsi</th>
-                                                <th width="15%">Label Sebenarnya</th>
-                                                <th width="15%">Prediksi KNN</th>
-                                                <th width="15%">Prediksi DT</th>
-                                                <th width="5%">Detail</th>
+                                                <th width="15%" class="text-center">Label Sebenarnya</th>
+                                                <th width="15%" class="text-center">Prediksi KNN</th>
+                                                <th width="15%" class="text-center">Prediksi DT</th>
+                                                <th width="5%" class="text-center">Detail</th>
                                             </tr>
                                         </thead>
                                         <tbody id="resultsTableBody">
@@ -486,20 +726,28 @@ try {
                                 </div>
                                 
                                 <div id="noResultsMessage" style="display: none;" class="alert alert-warning mt-3">
-                                    <i class="bi bi-exclamation-triangle me-2"></i>
-                                    Tidak ada hasil yang sesuai dengan pencarian.
+                                    <div class="d-flex align-items-center">
+                                        <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
+                                        <div>
+                                            <strong>Tidak ada hasil</strong><br>
+                                            <span>Tidak ada hasil yang sesuai dengan pencarian.</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Navigation Buttons -->
-                    <div class="d-flex justify-content-between mt-4">
+                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 0.8s">
                         <a href="index.php" class="btn btn-outline-secondary">
                             <i class="bi bi-arrow-left me-1"></i> Kembali ke Upload
                         </a>
-                        <a href="visualisasi.php" class="btn btn-primary">
-                            <i class="bi bi-bar-chart me-1"></i> Lihat Visualisasi Data
+                        <a href="history.php" class="btn btn-outline-primary">
+                            <i class="bi bi-clock-history me-1"></i> Riwayat Klasifikasi
+                        </a>
+                        <a href="visualisasi.php<?= $upload_id ? '?upload_id='.$upload_id : '' ?>" class="btn btn-primary">
+                            <i class="bi bi-bar-chart me-1"></i> Lihat Visualisasi
                         </a>
                     </div>
                 </div>
@@ -508,10 +756,10 @@ try {
                 </div>
             </div>
         </div>
-        
+       
         <!-- Form Prediksi Judul Baru -->
-        <div id="predictionForm" class="card mb-4">
-            <div class="card-header bg-primary text-white">
+        <div id="predictionForm" class="card mb-4 fade-in">
+            <div class="card-header">
                 <h3 class="text-center mb-0">Prediksi Judul Skripsi Baru</h3>
                 <p class="text-center mb-0 mt-2">Langkah 3: Uji Model dengan Judul Baru</p>
             </div>
@@ -525,19 +773,20 @@ try {
                 <!-- Breadcrumb -->
                 <nav aria-label="breadcrumb" class="mb-3">
                     <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="index.php">Beranda</a></li>
-                        <li class="breadcrumb-item"><a href="result.php">Hasil Klasifikasi</a></li>
+                        <li class="breadcrumb-item"><a href="index.php" class="text-decoration-none">Beranda</a></li>
+                        <li class="breadcrumb-item"><a href="result.php" class="text-decoration-none">Hasil Klasifikasi</a></li>
                         <li class="breadcrumb-item active" aria-current="page">Prediksi Judul Baru</li>
                     </ol>
                 </nav>
                 
                 <form id="predictForm" class="mb-4">
                     <div class="mb-3">
-                        <label for="title" class="form-label">
+                        <label for="title" class="form-label fw-bold">
                             <i class="bi bi-pencil me-1"></i>
                             Masukkan Judul Skripsi:
                         </label>
                         <textarea id="title" class="form-control" rows="3" required placeholder="Contoh: Sistem Informasi Manajemen Perpustakaan Berbasis Web"></textarea>
+                        <div class="form-text">Masukkan judul skripsi lengkap untuk mendapatkan hasil prediksi yang lebih akurat.</div>
                     </div>
                     <div class="text-center mb-3">
                         <button type="submit" class="btn btn-primary">
@@ -552,45 +801,51 @@ try {
                 <div id="loadingPredict" class="text-center my-4">
                     <div class="spinner-border text-primary" role="status"></div>
                     <p class="mt-2">Sedang memproses prediksi...</p>
+                    <p class="text-muted small">IndoBERT sedang menganalisis judul yang Anda masukkan</p>
                 </div>
                 
                 <div id="predictionResult" class="prediction-animation" style="display: none;">
                     <div class="card bg-light">
-                        <div class="card-header bg-light">
+                        <div class="card-header bg-white">
                             <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Hasil Prediksi</h5>
                         </div>
                         <div class="card-body">
-                            <h6 class="card-title">Judul:</h6>
-                            <p id="predictedTitle" class="mb-4 p-2 bg-white rounded"></p>
+                            <h6 class="card-title fw-bold">Judul:</h6>
+                            <p id="predictedTitle" class="mb-4 p-3 bg-white rounded border"></p>
                             
-                            <div class="row mt-4">
+                            <div class="row mt-4 g-4">
                                 <div class="col-md-6">
-                                    <div class="card bg-primary text-white">
+                                    <div class="card bg-primary text-white h-100">
                                         <div class="card-body text-center">
                                             <h5 class="card-title">
                                                 <i class="bi bi-bullseye me-2"></i>KNN
                                             </h5>
-                                            <h3 id="predictedKNN" class="my-3"></h3>
+                                            <h3 id="predictedKNN" class="display-6 my-3 fw-bold"></h3>
                                             <p class="mb-0 small" id="knnConfidence"></p>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <div class="card bg-success text-white">
+                                    <div class="card bg-success text-white h-100">
                                         <div class="card-body text-center">
                                             <h5 class="card-title">
                                                 <i class="bi bi-diagram-3 me-2"></i>Decision Tree
                                             </h5>
-                                            <h3 id="predictedDT" class="my-3"></h3>
-                                            <p class="mb-0 small">Berdasarkan keputusan pohon</p>
+                                            <h3 id="predictedDT" class="display-6 my-3 fw-bold"></h3>
+                                            <p class="mb-0 small">Berdasarkan pohon keputusan</p>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             
                             <div class="alert alert-info mt-4 mb-0">
-                                <i class="bi bi-info-circle me-2"></i>
-                                <span id="predictionMessage"></span>
+                                <div class="d-flex">
+                                    <i class="bi bi-info-circle-fill fs-4 me-3"></i>
+                                    <div>
+                                        <strong>Hasil Analisis</strong>
+                                        <p class="mb-0" id="predictionMessage"></p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -606,40 +861,48 @@ try {
                 </div>
             </div>
         </div>
-        
+       
         <!-- Modal untuk detail hasil -->
         <div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header bg-primary text-white">
                         <h5 class="modal-title" id="detailModalLabel">Detail Prediksi</h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <h6>Judul Skripsi:</h6>
-                        <p id="modalTitle" class="p-2 bg-light rounded"></p>
+                        <h6 class="fw-bold">Judul Skripsi:</h6>
+                        <p id="modalTitle" class="p-3 bg-light rounded border mb-4"></p>
                         
-                        <table class="table table-bordered mt-3">
-                            <tr>
-                                <th>Kategori</th>
-                                <th>Label Sebenarnya</th>
-                                <th>KNN</th>
-                                <th>Decision Tree</th>
-                            </tr>
-                            <tr>
-                                <td id="modalCategory"></td>
-                                <td id="modalActual"></td>
-                                <td id="modalKNN"></td>
-                                <td id="modalDT"></td>
-                            </tr>
-                        </table>
+                        <div class="table-responsive">
+                            <table class="table table-bordered">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Kategori</th>
+                                        <th>Label Sebenarnya</th>
+                                        <th>KNN</th>
+                                        <th>Decision Tree</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td id="modalCategory" class="fw-bold text-primary"></td>
+                                        <td id="modalActual"></td>
+                                        <td id="modalKNN"></td>
+                                        <td id="modalDT"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                         
-                        <div class="alert alert-secondary mt-3">
-                            <small>
-                                <i class="bi bi-info-circle me-1"></i>
-                                Hasil ini berdasarkan model yang telah dilatih dengan data skripsi.
-                                Nilai akurasi menunjukkan tingkat ketepatan model dalam klasifikasi.
-                            </small>
+                        <div class="alert alert-light border mt-4 mb-0">
+                            <div class="d-flex">
+                                <i class="bi bi-info-circle me-3 fs-4 text-primary"></i>
+                                <div>
+                                    <strong>Informasi</strong>
+                                    <p class="mb-0 small">Hasil ini berdasarkan model yang telah dilatih dengan data skripsi. Nilai akurasi menunjukkan tingkat ketepatan model dalam klasifikasi. Kategori utama untuk judul ini adalah <span id="modalMainCategory" class="fw-bold"></span>.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -649,10 +912,21 @@ try {
             </div>
         </div>
     </div>
-    
+   
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Ambil data dari PHP
+            const databaseResults = <?= json_encode($results) ?>;
+            const knnAccuracy = <?= json_encode($knnAccuracy) ?>;
+            const dtAccuracy = <?= json_encode($dtAccuracy) ?>;
+            
+            // Animasi elemen saat halaman dimuat
+            const animatedElements = document.querySelectorAll('.fade-in');
+            animatedElements.forEach((element, index) => {
+                element.style.animationDelay = (index * 0.1) + 's';
+            });
+            
             // Cek status API
             const apiStatusEl = document.getElementById('apiStatus');
             checkApiStatus();
@@ -679,284 +953,382 @@ try {
                 });
             }
             
-            // Cek apakah ada data hasil klasifikasi di sessionStorage
-            const resultsData = sessionStorage.getItem('classificationResults');
-            
-            if (!resultsData) {
-                document.getElementById('noData').style.display = 'block';
-                return;
-            }
-            
-            const data = JSON.parse(resultsData);
-            document.getElementById('results').style.display = 'block';
-            
-            // Tampilkan akurasi
-            const knnAccuracy = (data.knn_accuracy * 100).toFixed(2);
-            const dtAccuracy = (data.dt_accuracy * 100).toFixed(2);
-            
-            document.getElementById('knnAccuracy').textContent = knnAccuracy + '%';
-            document.getElementById('dtAccuracy').textContent = dtAccuracy + '%';
-            
-            // Update progress bar
-            document.getElementById('knnProgress').style.width = knnAccuracy + '%';
-            document.getElementById('dtProgress').style.width = dtAccuracy + '%';
-            
-            // Tentukan model terbaik
-            if (parseFloat(knnAccuracy) >= parseFloat(dtAccuracy)) {
-                document.getElementById('bestModel').textContent = 'KNN (' + knnAccuracy + '%)';
-            } else {
-                document.getElementById('bestModel').textContent = 'Decision Tree (' + dtAccuracy + '%)';
-            }
-            
-            // Tampilkan grafik akurasi menggunakan Chart.js
-            const ctx = document.getElementById('accuracyChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['KNN', 'Decision Tree'],
-                    datasets: [{
-                        label: 'Akurasi (%)',
-                        data: [knnAccuracy, dtAccuracy],
-                        backgroundColor: [
-                            'rgba(13, 110, 253, 0.7)',
-                            'rgba(25, 135, 84, 0.7)'
-                        ],
-                        borderColor: [
-                            'rgba(13, 110, 253, 1)',
-                            'rgba(25, 135, 84, 1)'
-                        ],
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.raw + '%';
-                                }
-                            }
-                        }
+            if (databaseResults && databaseResults.length > 0) {
+                // Tampilkan data dari database
+                document.getElementById('results').style.display = 'block';
+                document.getElementById('noData').style.display = 'none';
+                
+                // Tampilkan akurasi
+                document.getElementById('knnAccuracy').textContent = knnAccuracy.toFixed(2) + '%';
+                document.getElementById('dtAccuracy').textContent = dtAccuracy.toFixed(2) + '%';
+                
+                // Update progress bars
+                setTimeout(() => {
+                    document.getElementById('knnProgress').style.width = knnAccuracy + '%';
+                    document.getElementById('dtProgress').style.width = dtAccuracy + '%';
+                }, 500);
+                
+                // Tentukan model terbaik
+                if (knnAccuracy >= dtAccuracy) {
+                    document.getElementById('bestModel').textContent = 'KNN (' + knnAccuracy.toFixed(2) + '%)';
+                } else {
+                    document.getElementById('bestModel').textContent = 'Decision Tree (' + dtAccuracy.toFixed(2) + '%)';
+                }
+                
+                // Tampilkan grafik akurasi menggunakan Chart.js
+                const ctx = document.getElementById('accuracyChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['KNN', 'Decision Tree'],
+                        datasets: [{
+                            label: 'Akurasi (%)',
+                            data: [knnAccuracy, dtAccuracy],
+                            backgroundColor: [
+                                'rgba(67, 97, 238, 0.7)',
+                                'rgba(25, 135, 84, 0.7)'
+                            ],
+                            borderColor: [
+                                'rgba(67, 97, 238, 1)',
+                                'rgba(25, 135, 84, 1)'
+                            ],
+                            borderWidth: 1,
+                            borderRadius: 6
+                        }]
                     },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            ticks: {
-                                callback: function(value) {
-                                    return value + '%';
+                    options: {
+                        responsive: true,
+                        animation: {
+                            duration: 2000,
+                            easing: 'easeOutQuart'
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.raw.toFixed(2) + '%';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value + '%';
+                                    }
+                                }
+                            },
+                            x: {
+                                grid: {
+                                    display: false
                                 }
                             }
                         }
                     }
-                }
-            });
-            
-            // Tampilkan confusion matrix
-            document.getElementById('knnMatrix').innerHTML = 
-                `<img src="data:image/png;base64,${data.knn_cm_img}" alt="KNN Confusion Matrix" class="img-fluid">`;
-            document.getElementById('dtMatrix').innerHTML = 
-                `<img src="data:image/png;base64,${data.dt_cm_img}" alt="Decision Tree Confusion Matrix" class="img-fluid">`;
-            
-            // Tampilkan perbandingan performa
-            if (data.performance_comparison_img) {
-                document.getElementById('performanceComparisonImg').src = 
-                    `data:image/png;base64,${data.performance_comparison_img}`;
-            }
-            
-            // Tampilkan detail metrik KNN
-            if (data.knn_detailed) {
-                // Update KNN parameters
-                if (data.knn_detailed.per_class) {
-                    // Display class metrics in a table
-                    const knnMetricsTable = document.getElementById('knnMetricsTableBody');
-                    knnMetricsTable.innerHTML = '';
+                });
+                
+                // Hitung metrik precision, recall, dan F1 score untuk KNN
+                const knnMetricsTable = document.getElementById('knnMetricsTableBody');
+                knnMetricsTable.innerHTML = '';
+                
+                // Hitung untuk setiap kategori
+                const categories = [...new Set(databaseResults.map(r => r.actual))];
+                
+                // Hitung confusion matrix dan metrik turunannya
+                let knnTruePositives = {}, knnFalsePositives = {}, knnFalseNegatives = {}, knnTrueNegatives = {};
+                
+                // Inisialisasi perhitungan untuk setiap kategori
+                categories.forEach(category => {
+                    knnTruePositives[category] = 0;
+                    knnFalsePositives[category] = 0;
+                    knnFalseNegatives[category] = 0;
+                    knnTrueNegatives[category] = 0;
+                });
+                
+                // Hitung confusion matrix
+                databaseResults.forEach(row => {
+                    categories.forEach(category => {
+                        if (row.actual === category && row.knn_pred === category) {
+                            knnTruePositives[category]++;
+                        } else if (row.actual !== category && row.knn_pred === category) {
+                            knnFalsePositives[category]++;
+                        } else if (row.actual === category && row.knn_pred !== category) {
+                            knnFalseNegatives[category]++;
+                        } else if (row.actual !== category && row.knn_pred !== category) {
+                            knnTrueNegatives[category]++;
+                        }
+                    });
+                });
+                
+                // Hitung metrik
+                let totalKnnPrecision = 0, totalKnnRecall = 0, totalKnnF1 = 0;
+                let weightedKnnPrecision = 0, weightedKnnRecall = 0, weightedKnnF1 = 0;
+                let totalSamples = databaseResults.length;
+                
+                categories.forEach(category => {
+                    const tp = knnTruePositives[category];
+                    const fp = knnFalsePositives[category];
+                    const fn = knnFalseNegatives[category];
+                    const precision = tp / (tp + fp) || 0;
+                    const recall = tp / (tp + fn) || 0;
+                    const f1 = 2 * (precision * recall) / (precision + recall) || 0;
                     
-                    // Overall metrics first
-                    knnMetricsTable.innerHTML += `
-                        <tr>
-                            <td>Accuracy</td>
-                            <td>${(data.knn_detailed.overall.accuracy * 100).toFixed(2)}%</td>
-                        </tr>
-                    `;
+                    const categoryCount = databaseResults.filter(r => r.actual === category).length;
+                    const weight = categoryCount / totalSamples;
                     
-                    // Check if classification report exists
-                    if (data.knn_detailed.classification_report && data.knn_detailed.classification_report['weighted avg']) {
-                        const weighted = data.knn_detailed.classification_report['weighted avg'];
-                        knnMetricsTable.innerHTML += `
-                            <tr>
-                                <td>Precision (weighted)</td>
-                                <td>${(weighted.precision * 100).toFixed(2)}%</td>
-                            </tr>
-                            <tr>
-                                <td>Recall (weighted)</td>
-                                <td>${(weighted.recall * 100).toFixed(2)}%</td>
-                            </tr>
-                            <tr>
-                                <td>F1-Score (weighted)</td>
-                                <td>${(weighted['f1-score'] * 100).toFixed(2)}%</td>
-                            </tr>
-                        `;
-                    }
-                }
-            }
-            
-            // Tampilkan detail metrik Decision Tree
-            if (data.dt_detailed) {
-                // Update DT parameters
-                document.getElementById('dtDepth').textContent = data.dt_detailed.overall.tree_depth || '0';
-                document.getElementById('dtLeaves').textContent = data.dt_detailed.overall.n_leaves || '0';
-                
-                if (data.dt_detailed.per_class) {
-                    // Display class metrics in a table
-                    const dtMetricsTable = document.getElementById('dtMetricsTableBody');
-                    dtMetricsTable.innerHTML = '';
+                    weightedKnnPrecision += precision * weight;
+                    weightedKnnRecall += recall * weight;
+                    weightedKnnF1 += f1 * weight;
                     
-                    // Overall metrics first
-                    dtMetricsTable.innerHTML += `
-                        <tr>
-                            <td>Accuracy</td>
-                            <td>${(data.dt_detailed.overall.accuracy * 100).toFixed(2)}%</td>
-                        </tr>
-                    `;
-                    
-                    // Check if classification report exists
-                    if (data.dt_detailed.classification_report && data.dt_detailed.classification_report['weighted avg']) {
-                        const weighted = data.dt_detailed.classification_report['weighted avg'];
-                        dtMetricsTable.innerHTML += `
-                            <tr>
-                                <td>Precision (weighted)</td>
-                                <td>${(weighted.precision * 100).toFixed(2)}%</td>
-                            </tr>
-                            <tr>
-                                <td>Recall (weighted)</td>
-                                <td>${(weighted.recall * 100).toFixed(2)}%</td>
-                            </tr>
-                            <tr>
-                                <td>F1-Score (weighted)</td>
-                                <td>${(weighted['f1-score'] * 100).toFixed(2)}%</td>
-                            </tr>
-                        `;
-                    }
-                }
-            }
-            
-            // Tampilkan tabel hasil
-            const tableBody = document.getElementById('resultsTableBody');
-            tableBody.innerHTML = '';
-            
-            data.results_table.forEach((row, index) => {
-                const correctKNN = row.actual === row.knn_pred;
-                const correctDT = row.actual === row.dt_pred;
+                    totalKnnPrecision += precision;
+                    totalKnnRecall += recall;
+                    totalKnnF1 += f1;
+                });
                 
-                const tr = document.createElement('tr');
-                tr.dataset.title = row.title;
-                tr.dataset.actual = row.actual;
-                tr.dataset.knn = row.knn_pred;
-                tr.dataset.dt = row.dt_pred;
+                // Rata-rata metrik (macro)
+                const macroKnnPrecision = totalKnnPrecision / categories.length;
+                const macroKnnRecall = totalKnnRecall / categories.length;
+                const macroKnnF1 = totalKnnF1 / categories.length;
                 
-                // Determine overall correctness
-                const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
-                
-                tr.dataset.correct = (correctCount === 2) ? 'all' : 
-                                     (correctCount > 0) ? 'partial' : 'none';
-                
-                const knnClass = correctKNN ? 'table-success' : 'table-danger';
-                const dtClass = correctDT ? 'table-success' : 'table-danger';
-                
-                tr.innerHTML = `
-                    <td>${index + 1}</td>
-                    <td>${row.title}</td>
-                    <td><span class="badge bg-secondary">${row.actual}</span></td>
-                    <td class="${knnClass}"><span class="badge ${correctKNN ? 'bg-success' : 'bg-danger'}">${row.knn_pred}</span></td>
-                    <td class="${dtClass}"><span class="badge ${correctDT ? 'bg-success' : 'bg-danger'}">${row.dt_pred}</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-primary detail-btn" data-bs-toggle="modal" data-bs-target="#detailModal" 
-                            data-index="${index}">
-                            <i class="bi bi-info-circle"></i>
-                        </button>
-                    </td>
+                // Tampilkan metrik KNN
+                knnMetricsTable.innerHTML += `
+                    <tr>
+                        <td>Accuracy</td>
+                        <td>${knnAccuracy.toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>Precision (weighted)</td>
+                        <td>${(weightedKnnPrecision * 100).toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>Recall (weighted)</td>
+                        <td>${(weightedKnnRecall * 100).toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>F1-Score (weighted)</td>
+                        <td>${(weightedKnnF1 * 100).toFixed(2)}%</td>
+                    </tr>
                 `;
                 
-                tableBody.appendChild(tr);
-            });
-            
-            // Event handler untuk filter dan pencarian
-            const filterButtons = document.querySelectorAll('.filter-btn');
-            const searchInput = document.getElementById('tableSearch');
-            
-            // Fungsi untuk filter dan pencarian
-            function filterTable() {
-                const searchTerm = searchInput.value.toLowerCase();
-                const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                let visibleCount = 0;
+                // Hitung metrik precision, recall, dan F1 score untuk Decision Tree
+                const dtMetricsTable = document.getElementById('dtMetricsTableBody');
+                dtMetricsTable.innerHTML = '';
                 
-                Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
-                    const title = row.dataset.title.toLowerCase();
-                    const correct = row.dataset.correct;
+                // Hitung confusion matrix dan metrik turunannya
+                let dtTruePositives = {}, dtFalsePositives = {}, dtFalseNegatives = {}, dtTrueNegatives = {};
+                
+                // Inisialisasi perhitungan untuk setiap kategori
+                categories.forEach(category => {
+                    dtTruePositives[category] = 0;
+                    dtFalsePositives[category] = 0;
+                    dtFalseNegatives[category] = 0;
+                    dtTrueNegatives[category] = 0;
+                });
+                
+                // Hitung confusion matrix
+                databaseResults.forEach(row => {
+                    categories.forEach(category => {
+                        if (row.actual === category && row.dt_pred === category) {
+                            dtTruePositives[category]++;
+                        } else if (row.actual !== category && row.dt_pred === category) {
+                            dtFalsePositives[category]++;
+                        } else if (row.actual === category && row.dt_pred !== category) {
+                            dtFalseNegatives[category]++;
+                        } else if (row.actual !== category && row.dt_pred !== category) {
+                            dtTrueNegatives[category]++;
+                        }
+                    });
+                });
+                
+                // Hitung metrik
+                let totalDtPrecision = 0, totalDtRecall = 0, totalDtF1 = 0;
+                let weightedDtPrecision = 0, weightedDtRecall = 0, weightedDtF1 = 0;
+                
+                categories.forEach(category => {
+                    const tp = dtTruePositives[category];
+                    const fp = dtFalsePositives[category];
+                    const fn = dtFalseNegatives[category];
+                    const precision = tp / (tp + fp) || 0;
+                    const recall = tp / (tp + fn) || 0;
+                    const f1 = 2 * (precision * recall) / (precision + recall) || 0;
                     
-                    // Filter berdasarkan teks
-                    const matchesSearch = title.includes(searchTerm);
+                    const categoryCount = databaseResults.filter(r => r.actual === category).length;
+                    const weight = categoryCount / totalSamples;
                     
-                    // Filter berdasarkan status (benar/salah)
-                    const matchesFilter = 
-                        activeFilter === 'all' || 
-                        (activeFilter === 'correct' && correct === 'all') ||
-                        (activeFilter === 'incorrect' && correct !== 'all');
+                    weightedDtPrecision += precision * weight;
+                    weightedDtRecall += recall * weight;
+                    weightedDtF1 += f1 * weight;
                     
-                    if (matchesSearch && matchesFilter) {
-                        row.style.display = '';
-                        visibleCount++;
-                    } else {
-                        row.style.display = 'none';
+                    totalDtPrecision += precision;
+                    totalDtRecall += recall;
+                    totalDtF1 += f1;
+                });
+                
+                // Rata-rata metrik (macro)
+                const macroDtPrecision = totalDtPrecision / categories.length;
+                const macroDtRecall = totalDtRecall / categories.length;
+                const macroDtF1 = totalDtF1 / categories.length;
+                
+                // Tampilkan metrik Decision Tree
+                dtMetricsTable.innerHTML += `
+                    <tr>
+                        <td>Accuracy</td>
+                        <td>${dtAccuracy.toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>Precision (weighted)</td>
+                        <td>${(weightedDtPrecision * 100).toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>Recall (weighted)</td>
+                        <td>${(weightedDtRecall * 100).toFixed(2)}%</td>
+                    </tr>
+                    <tr>
+                        <td>F1-Score (weighted)</td>
+                        <td>${(weightedDtF1 * 100).toFixed(2)}%</td>
+                    </tr>
+                `;
+                
+                // Default values for tree parameters
+                document.getElementById('dtDepth').textContent = "N/A";
+                document.getElementById('dtLeaves').textContent = "N/A";
+                
+                // Tampilkan tabel hasil
+                const tableBody = document.getElementById('resultsTableBody');
+                tableBody.innerHTML = '';
+                
+                databaseResults.forEach((row, index) => {
+                    const correctKNN = row.actual === row.knn_pred;
+                    const correctDT = row.actual === row.dt_pred;
+                    
+                    const tr = document.createElement('tr');
+                    tr.dataset.title = row.title;
+                    tr.dataset.actual = row.actual;
+                    tr.dataset.knn = row.knn_pred;
+                    tr.dataset.dt = row.dt_pred;
+                    
+                    // Determine overall correctness
+                    const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
+                    
+                    tr.dataset.correct = (correctCount === 2) ? 'all' : 
+                                        (correctCount > 0) ? 'partial' : 'none';
+                    
+                    if (correctCount === 2) {
+                        tr.classList.add('table-success');
+                    } else if (correctCount === 0) {
+                        tr.classList.add('table-danger');
                     }
+                    
+                    const knnClass = correctKNN ? 'bg-success' : 'bg-danger';
+                    const dtClass = correctDT ? 'bg-success' : 'bg-danger';
+                    
+                    tr.innerHTML = `
+                        <td class="text-center">${index + 1}</td>
+                        <td>${row.title}</td>
+                        <td class="text-center"><span class="badge bg-secondary rounded-pill">${row.actual}</span></td>
+                        <td class="text-center"><span class="badge ${knnClass} rounded-pill">${row.knn_pred}</span></td>
+                        <td class="text-center"><span class="badge ${dtClass} rounded-pill">${row.dt_pred}</span></td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-primary detail-btn" data-bs-toggle="modal" data-bs-target="#detailModal" 
+                                data-index="${index}">
+                                <i class="bi bi-info-circle"></i>
+                            </button>
+                        </td>
+                    `;
+                    
+                    tableBody.appendChild(tr);
                 });
                 
-                // Tampilkan pesan jika tidak ada hasil
-                document.getElementById('noResultsMessage').style.display = visibleCount > 0 ? 'none' : 'block';
-            }
-            
-            // Aktifkan filter buttons
-            filterButtons.forEach(button => {
-                button.addEventListener('click', function() {
-                    // Reset semua button
-                    filterButtons.forEach(btn => btn.classList.remove('active'));
-                    
-                    // Aktifkan button yang diklik
-                    this.classList.add('active');
-                    
-                    // Filter tabel
-                    filterTable();
+                // Tambahkan hover effect
+                const tableRows = document.querySelectorAll('#resultsTableBody tr');
+                tableRows.forEach(row => {
+                    row.addEventListener('mouseenter', function() {
+                        this.classList.add('highlight-row');
+                    });
+                    row.addEventListener('mouseleave', function() {
+                        this.classList.remove('highlight-row');
+                    });
                 });
-            });
-            
-            // Aktifkan "all" filter by default
-            const allFilterBtn = document.querySelector('[data-filter="all"]');
-            if (allFilterBtn) allFilterBtn.classList.add('active');
-            
-            // Aktifkan pencarian
-            if (searchInput) {
-                searchInput.addEventListener('input', filterTable);
-            }
-            
-            // Event handler untuk tombol detail
-            const detailButtons = document.querySelectorAll('.detail-btn');
-            detailButtons.forEach(button => {
-                button.addEventListener('click', function() {
-                    const index = this.dataset.index;
-                    const row = data.results_table[index];
+                
+                // Event handler untuk filter dan pencarian
+                const filterButtons = document.querySelectorAll('.filter-btn');
+                const searchInput = document.getElementById('tableSearch');
+                
+                // Fungsi untuk filter dan pencarian
+                function filterTable() {
+                    const searchTerm = searchInput.value.toLowerCase();
+                    const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                    let visibleCount = 0;
                     
-                    document.getElementById('modalTitle').textContent = row.full_title || row.title;
-                    document.getElementById('modalCategory').textContent = row.actual;
-                    document.getElementById('modalActual').textContent = row.actual;
-                    document.getElementById('modalKNN').textContent = row.knn_pred;
-                    document.getElementById('modalDT').textContent = row.dt_pred;
+                    Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
+                        const title = row.dataset.title.toLowerCase();
+                        const correct = row.dataset.correct;
+                        
+                        // Filter berdasarkan teks
+                        const matchesSearch = title.includes(searchTerm);
+                        
+                        // Filter berdasarkan status (benar/salah)
+                        const matchesFilter = 
+                            activeFilter === 'all' || 
+                            (activeFilter === 'correct' && correct === 'all') ||
+                            (activeFilter === 'incorrect' && correct !== 'all');
+                        
+                        if (matchesSearch && matchesFilter) {
+                            row.style.display = '';
+                            visibleCount++;
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    });
+                    
+                    // Tampilkan pesan jika tidak ada hasil
+                    document.getElementById('noResultsMessage').style.display = visibleCount > 0 ? 'none' : 'block';
+                }
+                
+                // Aktifkan filter buttons
+                filterButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        // Reset semua button
+                        filterButtons.forEach(btn => btn.classList.remove('active'));
+                        
+                        // Aktifkan button yang diklik
+                        this.classList.add('active');
+                        
+                        // Filter tabel
+                        filterTable();
+                    });
                 });
-            });
+                
+                // Aktifkan pencarian
+                if (searchInput) {
+                    searchInput.addEventListener('input', filterTable);
+                }
+                
+                // Aktifkan handler untuk tombol detail
+                const detailButtons = document.querySelectorAll('.detail-btn');
+                detailButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const index = this.dataset.index;
+                        const row = databaseResults[index];
+                        
+                        document.getElementById('modalTitle').textContent = row.title;
+                        document.getElementById('modalCategory').textContent = row.actual;
+                        document.getElementById('modalActual').textContent = row.actual;
+                        document.getElementById('modalKNN').textContent = row.knn_pred;
+                        document.getElementById('modalDT').textContent = row.dt_pred;
+                        document.getElementById('modalMainCategory').textContent = row.actual;
+                    });
+                });
+            } else {
+                document.getElementById('results').style.display = 'none';
+                document.getElementById('noData').style.display = 'block';
+            }
             
             // Event handler untuk tombol prediksi
             const showPredictionBtn = document.getElementById('showPredictionBtn');
@@ -1017,13 +1389,19 @@ try {
                     document.getElementById('predictionResult').style.display = 'none';
                     document.getElementById('predictForm').style.display = 'none';
                     
+                    // Tambahkan upload_id jika ada
+                    const upload_id = <?= $upload_id ? $upload_id : 'null' ?>;
+                    
                     // Kirim request ke API
                     fetch('<?php echo API_URL; ?>/predict', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ title: title })
+                        body: JSON.stringify({ 
+                            title: title,
+                            upload_id: upload_id // Tambahkan upload_id
+                        })
                     })
                     .then(response => {
                         if (!response.ok) {
@@ -1050,9 +1428,9 @@ try {
                         const knnMatch = data.knn_prediction === data.dt_prediction;
                         
                         if (knnMatch) {
-                            predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama, menunjukkan tingkat kepercayaan yang tinggi.";
+                            predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama (" + data.knn_prediction + "), menunjukkan tingkat kepercayaan yang tinggi terhadap hasil klasifikasi judul ini.";
                         } else {
-                            predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan keduanya berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
+                            predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan hasil KNN (" + data.knn_prediction + ") atau Decision Tree (" + data.dt_prediction + ") berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
                         }
                         
                         document.getElementById('predictionResult').style.display = 'block';

@@ -71,7 +71,7 @@ def get_db_connection():
         return None
 
 # Simpan hasil prediksi ke database
-def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=0):
+def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=0, upload_file_id=None):
     try:
         conn = get_db_connection()
         if conn:
@@ -91,12 +91,32 @@ def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=
                 
                 # Simpan prediksi
                 cursor.execute("""
-                    INSERT INTO predictions (title, actual_category_id, knn_prediction_id, dt_prediction_id, confidence)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (title, actual_id, knn_id, dt_id, confidence))
+                    INSERT INTO predictions (title, actual_category_id, knn_prediction_id, dt_prediction_id, confidence, upload_file_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (title, actual_id, knn_id, dt_id, confidence, upload_file_id))
                 
                 conn.commit()
-                return cursor.lastrowid
+                prediction_id = cursor.lastrowid
+                
+                # Juga simpan di classification_results jika title_id tersedia
+                if actual_id:
+                    # Cek apakah judul sudah ada di thesis_titles
+                    cursor.execute("SELECT id FROM thesis_titles WHERE title = %s", (title,))
+                    title_result = cursor.fetchone()
+                    
+                    if title_result:
+                        title_id = title_result['id']
+                        
+                        # Simpan ke classification_results
+                        cursor.execute("""
+                            INSERT INTO classification_results 
+                            (title_id, knn_prediction_id, dt_prediction_id, confidence)
+                            VALUES (%s, %s, %s, %s)
+                        """, (title_id, knn_id, dt_id, confidence))
+                        
+                        conn.commit()
+                
+                return prediction_id
             conn.close()
     except Exception as e:
         print(f"Error saving prediction to database: {str(e)}")
@@ -468,6 +488,25 @@ def process_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
         
+        # Simpan informasi file ke database
+        upload_id = None
+        try:
+            conn = get_db_connection()
+            if conn:
+                with conn.cursor() as cursor:
+                    file_size = os.path.getsize(file_path)
+                    
+                    cursor.execute("""
+                        INSERT INTO uploaded_files (filename, original_filename, file_size, processed)
+                        VALUES (%s, %s, %s, %s)
+                    """, (file_path, file.filename, file_size, False))
+                    
+                    conn.commit()
+                    upload_id = cursor.lastrowid
+                conn.close()
+        except Exception as e:
+            print(f"Error saving upload info: {str(e)}")
+        
         try:
             # Baca file Excel
             df = pd.read_excel(file_path)
@@ -679,16 +718,6 @@ def process_file():
                 conn = get_db_connection()
                 if conn:
                     with conn.cursor() as cursor:
-                        # Simpan file yang diupload
-                        file_size = os.path.getsize(file_path)
-                        
-                        cursor.execute("""
-                            INSERT INTO uploaded_files (filename, original_filename, file_size, processed)
-                            VALUES (%s, %s, %s, %s)
-                        """, (file_path, file.filename, file_size, True))
-                        
-                        upload_id = cursor.lastrowid
-                        
                         # Simpan performa model
                         save_model_performance('KNN', knn_acc, {'n_neighbors': 3})
                         save_model_performance('Decision Tree', dt_acc, {'max_depth': dt.model.get_depth(), 'criterion': dt.criterion})
@@ -718,7 +747,9 @@ def process_file():
                                 result['full_title'], 
                                 result['actual'], 
                                 result['knn_pred'], 
-                                result['dt_pred']
+                                result['dt_pred'],
+                                confidence=0.9,  # Default confidence
+                                upload_file_id=upload_id
                             )
                         
                         conn.commit()
@@ -727,6 +758,11 @@ def process_file():
                         for category in unique_labels:
                             category_titles = [titles[i] for i in range(len(titles)) if labels[i] == category]
                             analyze_keywords(category, category_titles)
+                            
+                        # Update status file upload menjadi processed
+                        if upload_id:
+                            cursor.execute("UPDATE uploaded_files SET processed = 1 WHERE id = %s", (upload_id,))
+                            conn.commit()
                     conn.close()
             except Exception as e:
                 print(f"Error saving data to database: {str(e)}")
@@ -744,7 +780,8 @@ def process_file():
                 'results_table': results_table,
                 'categories': unique_labels,
                 'knn_detailed': knn_detailed,
-                'dt_detailed': dt_detailed
+                'dt_detailed': dt_detailed,
+                'upload_id': upload_id  # Tambahkan upload_id untuk referensi
             }))
             
         except Exception as e:
@@ -763,6 +800,7 @@ def predict_title():
     
     try:
         title = data['title']
+        upload_id = data.get('upload_id')  # Tambahkan parameter upload_id
         
         # Cek apakah model sudah dilatih
         if trained_knn is None or trained_dt is None:
@@ -784,29 +822,21 @@ def predict_title():
         # Simpan cache embedding ke disk
         save_embedding_cache()
         
-        # Simpan prediksi ke database
+        # Simpan prediksi ke database dengan upload_id jika ada
         try:
-            conn = get_db_connection()
-            if conn:
-                with conn.cursor() as cursor:
-                    # Ambil kategori yang paling banyak diprediksi sebagai kategori sebenarnya
-                    actual_category = None
-                    if knn_pred == dt_pred:
-                        actual_category = knn_pred
-                    else:
-                        actual_category = knn_pred  # Default ke KNN jika berbeda
-                    
-                    # Simpan prediksi
-                    prediction_id = save_prediction_to_db(
-                        title,
-                        actual_category,
-                        knn_pred,
-                        dt_pred,
-                        1.0 - distances[0][0]  # Confidence berdasarkan jarak
-                    )
-                conn.close()
+            # Prediksi single title biasanya tidak punya actual_category
+            # Gunakan knn_pred sebagai actual_category untuk konsistensi
+            prediction_id = save_prediction_to_db(
+                title,
+                knn_pred,  # Gunakan knn_pred sebagai actual_category
+                knn_pred,
+                dt_pred,
+                1.0 - distances[0][0],  # Confidence berdasarkan jarak
+                upload_id  # Tambahkan upload_id
+            )
         except Exception as e:
             print(f"Error saving prediction to database: {str(e)}")
+            prediction_id = None
         
         # Kirim hasil ke frontend dengan konversi nilai numpy
         result = convert_numpy_types({
@@ -814,7 +844,8 @@ def predict_title():
             'knn_prediction': knn_pred,
             'dt_prediction': dt_pred,
             'nearest_neighbors': nearest_titles,
-            'knn_confidence': float(1.0 - distances[0][0])  # Confidence sebagai 1 - jarak
+            'knn_confidence': float(1.0 - distances[0][0]),  # Confidence sebagai 1 - jarak
+            'prediction_id': prediction_id
         })
         
         return jsonify(result)
@@ -953,7 +984,7 @@ def get_predictions():
             with conn.cursor() as cursor:
                 cursor.execute("""
                     SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, 
+                           p.confidence, p.prediction_date, p.upload_file_id,
                            c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
                     FROM predictions p
                     LEFT JOIN categories c1 ON p.actual_category_id = c1.id
@@ -1008,6 +1039,84 @@ def get_prediction_detail(prediction_id):
             return jsonify({'success': False, 'error': 'Database connection failed'}), 500
     except Exception as e:
         print(f"Error getting prediction detail: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint baru untuk mendapatkan prediksi berdasarkan upload_id
+@app.route('/get_predictions_by_upload/<int:upload_id>', methods=['GET'])
+def get_predictions_by_upload(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                           p.confidence, p.prediction_date, 
+                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    WHERE p.upload_file_id = %s
+                    ORDER BY p.prediction_date DESC
+                """, (upload_id,))
+                predictions = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for pred in predictions:
+                    if 'prediction_date' in pred and pred['prediction_date']:
+                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Dapatkan informasi file yang diupload
+                cursor.execute("""
+                    SELECT id, original_filename, file_size, upload_date, processed
+                    FROM uploaded_files
+                    WHERE id = %s
+                """, (upload_id,))
+                file_info = cursor.fetchone()
+                
+                if file_info and 'upload_date' in file_info and file_info['upload_date']:
+                    file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({
+                    'success': True, 
+                    'predictions': predictions,
+                    'file_info': file_info
+                })
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting predictions by upload: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan daftar file yang telah diupload
+@app.route('/get_uploaded_files', methods=['GET'])
+def get_uploaded_files():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
+                           COUNT(p.id) as prediction_count
+                    FROM uploaded_files uf
+                    LEFT JOIN predictions p ON uf.id = p.upload_file_id
+                    GROUP BY uf.id
+                    ORDER BY uf.upload_date DESC
+                """)
+                files = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for file in files:
+                    if 'upload_date' in file and file['upload_date']:
+                        file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({'success': True, 'files': files})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting uploaded files: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':

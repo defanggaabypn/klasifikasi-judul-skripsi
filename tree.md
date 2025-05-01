@@ -20,6 +20,7 @@ project/
 │   ├── config.php
 │   ├── databse_config.php
 │   ├── export.php
+        history.php
 │   ├── index.php
 │   ├── install.php
 │   ├── result.php

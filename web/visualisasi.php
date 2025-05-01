@@ -203,7 +203,6 @@ $modelPerformance = $database->fetchAll("
                 <!-- Navigasi Menu -->
                 <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
                     <div class="container-fluid">
-                        <span class="navbar-brand">Menu:</span>
                         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                             aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                             <span class="navbar-toggler-icon"></span>
@@ -225,6 +224,11 @@ $modelPerformance = $database->fetchAll("
                                         <i class="bi bi-bar-chart"></i> Visualisasi Data
                                     </a>
                                 </li>
+                                <li class="nav-item">
+                    <a class="nav-link" href="history.php">
+                        <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
+                    </a>
+                </li>
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
                                        data-bs-toggle="dropdown" aria-expanded="false">

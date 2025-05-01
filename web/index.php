@@ -21,17 +21,32 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Klasifikasi Judul Skripsi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <style>
+        :root {
+          --primary-color: #4361ee;
+          --secondary-color: #3f37c9;
+          --success-color: #4cc9f0;
+          --info-color: #4895ef;
+          --warning-color: #f72585;
+          --light-color: #f8f9fa;
+          --dark-color: #212529;
+        }
+        
         body {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #f0f2f5;
             padding-top: 50px;
             padding-bottom: 50px;
-            background-color: #f8f9fa;
         }
+        
         .container {
             max-width: 800px;
         }
+        
         #loading {
             display: none;
             position: fixed;
@@ -39,72 +54,219 @@ try {
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.7);
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
             z-index: 9999;
             text-align: center;
             padding-top: 200px;
             color: white;
         }
+        
         .card {
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.05);
             border: none;
-            border-radius: 10px;
+            transition: transform 0.3s, box-shadow 0.3s;
             overflow: hidden;
+            margin-bottom: 30px;
         }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.1);
+        }
+        
         .card-header {
             border-bottom: none;
             padding: 20px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
         }
+        
+        .btn {
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background: var(--secondary-color);
+            border-color: var(--secondary-color);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
         .step-container {
             display: flex;
             justify-content: center;
-            margin: 30px 0;
+            margin: 40px 0;
         }
+        
         .step {
-            width: 30px;
-            height: 30px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             background-color: #dee2e6;
             color: #6c757d;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 30px;
+            margin: 0 40px;
             position: relative;
             font-weight: bold;
+            font-size: 18px;
         }
+        
         .step.active {
-            background-color: #0d6efd;
+            background-color: var(--primary-color);
             color: white;
         }
+        
         .step:not(:last-child):after {
             content: '';
             position: absolute;
-            width: 60px;
+            width: 80px;
             height: 2px;
             background-color: #dee2e6;
             top: 50%;
-            left: 30px;
+            left: 40px;
         }
+        
         .step.active:not(:last-child):after {
-            background-color: #0d6efd;
+            background-color: var(--primary-color);
         }
-        .feature-box {
-            border-left: 4px solid #0d6efd;
-            padding: 10px 15px;
+        
+        .feature-card {
+            border-left: 4px solid var(--primary-color);
+            background-color: white;
+            padding: 15px;
             margin-bottom: 15px;
-            background-color: #f8f9fa;
-            border-radius: 0 5px 5px 0;
+            border-radius: 0 10px 10px 0;
+            transition: all 0.3s;
         }
+        
+        .feature-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        }
+        
         .feature-title {
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .feature-title i {
+            margin-right: 8px;
+        }
+        
+        .count-up {
+            font-size: 2.5rem;
             font-weight: bold;
-            color: #0d6efd;
+            color: var(--primary-color);
+        }
+        
+        .bg-pattern {
+            background-color: var(--primary-color);
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            padding: 50px 0;
+            margin-bottom: 30px;
+            border-radius: 0 0 20px 20px;
+        }
+        
+        .navbar {
+            border-radius: 10px;
+            padding: 10px 15px;
+            margin-bottom: 25px;
+            background-color: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 15px;
+        }
+        
+        .fade-in {
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 15px;
+            }
+            
+            .card-header {
+                padding: 15px;
+            }
+            
+            .step {
+                width: 30px;
+                height: 30px;
+                margin: 0 20px;
+                font-size: 14px;
+            }
+            
+            .step:not(:last-child):after {
+                width: 40px;
+                left: 30px;
+            }
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+
+        .loading-pulse {
+            animation: pulse 1.5s infinite ease-in-out;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-icon {
+            font-size: 2rem;
+            width: 70px;
+            height: 70px;
+            line-height: 70px;
+            background: rgba(67, 97, 238, 0.1);
+            color: var(--primary-color);
+            margin: 0 auto 15px;
+            border-radius: 50%;
         }
     </style>
 </head>
 <body>
     <div id="loading">
-        <div class="spinner-border text-light" role="status" style="width: 3rem; height: 3rem;"></div>
+        <div class="spinner-border text-light loading-pulse" role="status" style="width: 3rem; height: 3rem;"></div>
         <h3 class="mt-3 text-white">Sedang Memproses...</h3>
         <p class="text-white">Ini mungkin membutuhkan waktu beberapa menit karena IndoBERT sedang menganalisis judul-judul</p>
         <div class="progress mt-3" style="width: 50%; margin: 0 auto;">
@@ -112,9 +274,14 @@ try {
         </div>
     </div>
 
+    <div class="bg-pattern text-center d-none d-md-block">
+        <h1 class="display-4 fw-bold text-white mb-0">Sistem Klasifikasi Judul Skripsi</h1>
+        <p class="lead text-white-50">Powered by IndoBERT & Machine Learning</p>
+    </div>
+
     <div class="container">
-        <div class="card mb-4">
-            <div class="card-header bg-primary text-white">
+        <div class="card mb-4 fade-in">
+            <div class="card-header">
                 <h2 class="text-center mb-0">Sistem Klasifikasi Judul Skripsi</h2>
             </div>
             <div class="card-body">
@@ -126,9 +293,8 @@ try {
                 </div>
                 
                 <!-- Navigasi Menu -->
-                <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+                <nav class="navbar navbar-expand-lg navbar-light">
                     <div class="container-fluid">
-                        <span class="navbar-brand">Menu:</span>
                         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" 
                             aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                             <span class="navbar-toggler-icon"></span>
@@ -150,6 +316,11 @@ try {
                                         <i class="bi bi-bar-chart"></i> Visualisasi Data
                                     </a>
                                 </li>
+                                <li class="nav-item">
+                    <a class="nav-link" href="history.php">
+                        <i class="bi bi-clock-history"></i> Riwayat Klasifikasi
+                    </a>
+                </li>
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" 
                                        data-bs-toggle="dropdown" aria-expanded="false">
@@ -163,17 +334,17 @@ try {
                             </ul>
                             <!-- API Status Indicator -->
                             <div class="ms-auto d-flex align-items-center">
-                                <small class="badge rounded-pill bg-light text-dark me-2" id="apiStatus">
+                                <span class="badge rounded-pill bg-light text-dark me-2" id="apiStatus">
                                     <i class="bi bi-circle-fill text-secondary me-1" style="font-size: 0.5rem;"></i>
                                     API Status
-                                </small>
+                                </span>
                             </div>
                         </div>
                     </div>
                 </nav>
                 
                 <!-- Database Status -->
-                <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3">
+                <div class="alert alert-<?php echo $dbStatus ? 'success' : 'danger'; ?> mb-3 fade-in" style="animation-delay: 0.1s">
                     <i class="bi bi-<?php echo $dbStatus ? 'check-circle' : 'exclamation-triangle'; ?>-fill me-2"></i>
                     Status Database: <?php echo $dbStatus ? 'Terhubung' : 'Tidak Terhubung - Periksa konfigurasi database Anda'; ?>
                 </div>
@@ -181,19 +352,23 @@ try {
                 <?php
                 // Tampilkan pesan error jika ada
                 if (isset($_SESSION['error'])) {
-                    showAlert($_SESSION['error'], 'danger');
+                    echo '<div class="alert alert-danger fade-in" style="animation-delay: 0.2s">';
+                    echo '<i class="bi bi-exclamation-triangle-fill me-2"></i>'.$_SESSION['error'];
+                    echo '</div>';
                     unset($_SESSION['error']);
                 }
                 
                 // Tampilkan pesan sukses jika ada
                 if (isset($_SESSION['success'])) {
-                    showAlert($_SESSION['success'], 'success');
+                    echo '<div class="alert alert-success fade-in" style="animation-delay: 0.2s">';
+                    echo '<i class="bi bi-check-circle-fill me-2"></i>'.$_SESSION['success'];
+                    echo '</div>';
                     unset($_SESSION['success']);
                 }
                 ?>
                 
                 <!-- Alur Penggunaan -->
-                <div class="alert alert-info">
+                <div class="alert alert-info fade-in" style="animation-delay: 0.3s">
                     <i class="bi bi-info-circle-fill me-2"></i>
                     <strong>Alur Penggunaan:</strong> 
                     <ol class="mb-0 ms-4">
@@ -203,13 +378,13 @@ try {
                     </ol>
                 </div>
                 
-                <div class="alert alert-info">
+                <div class="alert alert-info fade-in" style="animation-delay: 0.4s">
                     <i class="bi bi-info-circle-fill me-2"></i>
                     <strong>Petunjuk:</strong> Upload file Excel (.xlsx) yang berisi judul-judul skripsi. Sistem akan mengklasifikasikan judul ke dalam kategori yang sesuai menggunakan model IndoBERT dan algoritma machine learning.
                 </div>
                 
-                <div class="card mb-4 border">
-                    <div class="card-header bg-light">
+                <div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.5s">
+                    <div class="card-header bg-white">
                         <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Upload File</h5>
                     </div>
                     <div class="card-body">
@@ -234,46 +409,51 @@ try {
                 
                 <!-- Statistik Database (jika ada) -->
                 <?php
-                $totalTitles = $database->fetch("SELECT COUNT(*) as count FROM thesis_titles");
-                $totalPredictions = $database->fetch("SELECT COUNT(*) as count FROM predictions");
-                
-                if ($totalTitles && $totalTitles['count'] > 0): 
-                ?>
-                <div class="card mb-4 border">
-                    <div class="card-header bg-light">
-                        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Statistik Database</h5>
+$totalTitles = $database->fetch("SELECT COUNT(*) as count FROM thesis_titles");
+$totalPredictions = $database->fetch("SELECT COUNT(*) as count FROM predictions");
+
+if ($totalTitles && $totalTitles['count'] > 0): 
+?>
+<div class="card mb-4 border-0 shadow-sm fade-in" style="animation-delay: 0.6s">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Statistik Database</h5>
+    </div>
+    <div class="card-body">
+        <div class="row text-center g-3">
+            <div class="col-md-6">
+                <div class="stat-card h-100">
+                    <div class="stat-icon">
+                        <i class="bi bi-file-earmark-text"></i>
                     </div>
-                    <div class="card-body">
-                        <div class="row text-center">
-                            <div class="col-md-6">
-                                <div class="card h-100 border-primary">
-                                    <div class="card-body">
-                                        <h1 class="display-4 text-primary"><?= number_format($totalTitles['count']) ?></h1>
-                                        <p class="lead">Judul Skripsi</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card h-100 border-success">
-                                    <div class="card-body">
-                                        <h1 class="display-4 text-success"><?= number_format($totalPredictions['count']) ?></h1>
-                                        <p class="lead">Prediksi</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="text-center mt-3">
-                            <a href="visualisasi.php" class="btn btn-outline-primary">
-                                <i class="bi bi-bar-chart me-1"></i> Lihat Visualisasi Data
-                            </a>
-                        </div>
-                    </div>
+                    <h2 class="count-up" id="titleCount"><?= number_format($totalTitles['count']) ?></h2>
+                    <p class="text-muted mb-0">Judul Skripsi</p>
                 </div>
-                <?php endif; ?>
+            </div>
+            <div class="col-md-6">
+                <div class="stat-card h-100">
+                    <div class="stat-icon">
+                        <i class="bi bi-lightning"></i>
+                    </div>
+                    <h2 class="count-up" id="predCount"><?= number_format($totalPredictions['count']) ?></h2>
+                    <p class="text-muted mb-0">Prediksi</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4">
+            <a href="visualisasi.php" class="btn btn-outline-primary me-2">
+                <i class="bi bi-bar-chart me-1"></i> Lihat Visualisasi Data
+            </a>
+            <a href="history.php" class="btn btn-outline-primary">
+                <i class="bi bi-clock-history me-1"></i> Lihat Riwayat Klasifikasi
+            </a>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
                 
-                <div class="card mb-4">
-                    <div class="card-header bg-light">
+                <div class="card mb-4 fade-in" style="animation-delay: 0.7s">
+                    <div class="card-header bg-white">
                         <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Informasi Sistem</h5>
                     </div>
                     <div class="card-body">
@@ -281,42 +461,77 @@ try {
                         
                         <div class="row">
                             <div class="col-md-4 mb-3">
-                                <div class="feature-box">
-                                    <div class="feature-title">RPL</div>
-                                    <small>Rekayasa Perangkat Lunak</small>
+                                <div class="feature-card">
+                                    <div class="feature-title"><i class="bi bi-code-slash"></i> RPL</div>
+                                    <div>Rekayasa Perangkat Lunak</div>
+                                    <small class="text-muted">Web, Mobile, Desktop</small>
                                 </div>
                             </div>
                             <div class="col-md-4 mb-3">
-                                <div class="feature-box">
-                                    <div class="feature-title">Jaringan</div>
-                                    <small>Jaringan Komputer</small>
+                                <div class="feature-card">
+                                    <div class="feature-title"><i class="bi bi-hdd-network"></i> Jaringan</div>
+                                    <div>Jaringan Komputer</div>
+                                    <small class="text-muted">Networking, Security</small>
                                 </div>
                             </div>
                             <div class="col-md-4 mb-3">
-                                <div class="feature-box">
-                                    <div class="feature-title">Multimedia</div>
-                                    <small>Desain dan Multimedia</small>
+                                <div class="feature-card">
+                                    <div class="feature-title"><i class="bi bi-camera"></i> Multimedia</div>
+                                    <div>Desain dan Multimedia</div>
+                                    <small class="text-muted">Grafis, Animasi, Video</small>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="mt-3">
-                            <h6><i class="bi bi-lightning-charge me-2"></i>Fitur Utama:</h6>
-                            <ul>
-                                <li>Pemrosesan bahasa alami menggunakan IndoBERT</li>
-                                <li>Klasifikasi dengan algoritma KNN dan Decision Tree</li>
-                                <li>Visualisasi hasil dengan grafik perbandingan dan confusion matrix</li>
-                                <li>Prediksi kategori untuk judul baru</li>
-                                <li>Export hasil ke Excel dan PDF</li>
-                                <li>Analisis performa detail KNN vs Decision Tree</li>
-                            </ul>
+                        <div class="mt-4">
+                            <h6 class="fw-bold"><i class="bi bi-lightning-charge me-2"></i>Fitur Utama:</h6>
+                            <div class="row g-3 mt-2">
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-cpu"></i></div>
+                                        <div>Pemrosesan bahasa alami menggunakan IndoBERT</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-graph-up"></i></div>
+                                        <div>Klasifikasi dengan algoritma KNN dan Decision Tree</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-bar-chart"></i></div>
+                                        <div>Visualisasi hasil dengan grafik perbandingan</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-search"></i></div>
+                                        <div>Prediksi kategori untuk judul baru</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-file-arrow-down"></i></div>
+                                        <div>Export hasil ke Excel dan PDF</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="d-flex">
+                                        <div class="me-3 text-primary"><i class="bi bi-file-earmark-bar-graph"></i></div>
+                                        <div>Analisis performa detail algoritma</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
-                        <div class="alert alert-secondary mt-3 mb-0">
-                            <small>
-                                <i class="bi bi-code-slash me-1"></i> 
-                                <strong>Tech Stack:</strong> Python Flask + IndoBERT + Scikit-learn | PHP + MySQL + Bootstrap
-                            </small>
+                        <div class="alert alert-secondary mt-4 mb-0">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-code-slash me-3 fs-4"></i>
+                                <div>
+                                    <strong>Tech Stack:</strong> Python Flask + IndoBERT + Scikit-learn | PHP + MySQL + Bootstrap
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -331,6 +546,12 @@ try {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Animasi elemen saat halaman dimuat
+            const animatedElements = document.querySelectorAll('.fade-in');
+            animatedElements.forEach((element, index) => {
+                element.style.animationDelay = (index * 0.1) + 's';
+            });
+            
             const uploadForm = document.getElementById('uploadForm');
             const fileInput = document.getElementById('file');
             const loadingEl = document.getElementById('loading');
@@ -339,6 +560,30 @@ try {
             
             // Cek status API
             checkApiStatus();
+            
+            // Animasi statistik jika ada
+            if (document.getElementById('titleCount')) {
+                animateValue('titleCount', 0, <?= $totalTitles ? $totalTitles['count'] : 0 ?>, 1500);
+            }
+            if (document.getElementById('predCount')) {
+                animateValue('predCount', 0, <?= $totalPredictions ? $totalPredictions['count'] : 0 ?>, 1500);
+            }
+            
+            function animateValue(id, start, end, duration) {
+                const obj = document.getElementById(id);
+                if (!obj) return;
+                
+                let startTimestamp = null;
+                const step = (timestamp) => {
+                    if (!startTimestamp) startTimestamp = timestamp;
+                    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                    obj.innerHTML = Math.floor(progress * (end - start) + start).toLocaleString();
+                    if (progress < 1) {
+                        window.requestAnimationFrame(step);
+                    }
+                };
+                window.requestAnimationFrame(step);
+            }
             
             function checkApiStatus() {
                 fetch('<?php echo API_URL; ?>/template', { 
