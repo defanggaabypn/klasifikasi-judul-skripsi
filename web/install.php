@@ -192,7 +192,7 @@ if (!file_exists('../python-api/app.py')) {
                     </h4>
                     <p>
                         <?php if ($success): ?>
-                            Sistem Klasifikasi Judul Skripsi telah berhasil diinstall. Silakan ikuti langkah-langkah berikut untuk menyelesaikan setup:
+                            ANALISIS PERBANDINGAN ALGORITMA K-NEAREST NEIGHBORS (KNN) DAN DECISION TREE BERDASARKAN HASIL SEMATIC SIMILARITY  JUDUL SKRIPSI DAN BIDANG KONSENSTRASI (STUDI KASUS : JURUSAN  PENDIDIKAN TEKNOLOGI INFORMASI DAN KOMUNIKASI) telah berhasil diinstall. Silakan ikuti langkah-langkah berikut untuk menyelesaikan setup:
                         <?php else: ?>
                             Terdapat beberapa masalah dalam proses instalasi. Silakan perbaiki masalah berikut dan coba lagi:
                         <?php endif; ?>
@@ -254,7 +254,7 @@ if (!file_exists('../python-api/app.py')) {
                 </div>
             </div>
             <div class="card-footer text-center text-muted">
-                <small>Sistem Klasifikasi Judul Skripsi v<?php echo APP_VERSION; ?></small>
+                <small>ANALISIS PERBANDINGAN ALGORITMA K-NEAREST NEIGHBORS (KNN) DAN DECISION TREE BERDASARKAN HASIL SEMATIC SIMILARITY  JUDUL SKRIPSI DAN BIDANG KONSENSTRASI (STUDI KASUS : JURUSAN  PENDIDIKAN TEKNOLOGI INFORMASI DAN KOMUNIKASI) v<?php echo APP_VERSION; ?></small>
             </div>
         </div>
     </div>

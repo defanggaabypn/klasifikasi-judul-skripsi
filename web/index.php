@@ -539,7 +539,7 @@ if ($totalTitles && $totalTitles['count'] > 0):
                 
             </div>
             <div class="card-footer text-center text-muted">
-                <small>Sistem Klasifikasi Judul Skripsi v<?php echo APP_VERSION; ?> | <?php echo date('Y'); ?></small>
+                <small>ANALISIS PERBANDINGAN ALGORITMA K-NEAREST NEIGHBORS (KNN) DAN DECISION TREE BERDASARKAN HASIL SEMATIC SIMILARITY  JUDUL SKRIPSI DAN BIDANG KONSENSTRASI (STUDI KASUS : JURUSAN  PENDIDIKAN TEKNOLOGI INFORMASI DAN KOMUNIKASI) v<?php echo APP_VERSION; ?> | <?php echo date('Y'); ?></small>
             </div>
         </div>
     </div>
