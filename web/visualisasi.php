@@ -468,25 +468,24 @@ $modelPerformance = $database->fetchAll("
                                         </div>
                                         
                                         <div class="mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="fw-bold">Ekspor Data</h6>
-    </div>
-    <div class="btn-group" role="group">
-        <a href="export.php?type=excel&overview=1" class="btn btn-success">
-            <i class="bi bi-file-earmark-excel me-1"></i> Ekspor Excel
-        </a>
-        <a href="export.php?type=pdf&overview=1" class="btn btn-danger">
-            <i class="bi bi-file-earmark-pdf me-1"></i> Ekspor PDF
-        </a>
-    </div>
-</div>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <h6 class="fw-bold">Ekspor Data</h6>
+                                        </div>
+                                        <div class="btn-group" role="group">
+                                            <a href="export.php?type=excel&overview=1" class="btn btn-success">
+                                                <i class="bi bi-file-earmark-excel me-1"></i> Ekspor Excel
+                                            </a>
+                                            <a href="export.php?type=pdf&overview=1" class="btn btn-danger">
+                                                <i class="bi bi-file-earmark-pdf me-1"></i> Ekspor PDF
+                                            </a>
+                                        </div>
+                                    </div>
                                     </div>
                                 </div>
                                 <?php endif; ?>
                             </div>
                         </div>
                     </div>
-                    
                     <!-- Tab Analisis Kata Kunci -->
                     <div class="tab-pane fade" id="keywords" role="tabpanel" aria-labelledby="keywords-tab">
                         <div class="card border-0 shadow-sm mt-3">
@@ -526,7 +525,8 @@ $modelPerformance = $database->fetchAll("
                                                         $tagClass = 'keyword-tag-' . min(5, ceil($count / 2));
                                                     ?>
                                                     <span class="keyword-tag <?= $tagClass ?>" title="Frekuensi: <?= $keyword['frequency'] ?>">
-                                                        <?= $keyword['keyword'] ?>
+                                                        <?= $keyword['keyword'] ?> 
+                                                        <span class="keyword-frequency">(<?= $keyword['frequency'] ?>)</span>
                                                     </span>
                                                     <?php 
                                                         $count++;
@@ -543,7 +543,6 @@ $modelPerformance = $database->fetchAll("
                             </div>
                         </div>
                     </div>
-                    
                     <!-- Tab Performa Model -->
                     <div class="tab-pane fade" id="performance" role="tabpanel" aria-labelledby="performance-tab">
                         <div class="card border-0 shadow-sm mt-3">
