@@ -1,7 +1,14 @@
-project/
+projct/
 ├── python-api/
 │   ├── cache/
+│   │   └── embedding_cache.json
 │   ├── models/
+│   │   ├── dt_model.py
+│   │   ├── indobert_processor.py
+│   │   ├── knn_model.py
+│   │   ├── model_evaluator.py
+│   │   ├── models.pkl
+│   │   └── visualization.py
 │   ├── uploads/
 │   ├── venv/
 │   ├── app.py
@@ -10,7 +17,7 @@ project/
 │   ├── assets/
 │   │   └── css/
 │   │       └── pdf-style.css
-│   ├── clasess/
+│   ├── classes/
 │   │   └── Exporter.php
 │   ├── temp/
 │   ├── uploads/
@@ -18,16 +25,16 @@ project/
 │   ├── composer.json
 │   ├── composer.lock
 │   ├── config.php
-│   ├── databse_config.php
+│   ├── database_config.php
 │   ├── delete_history.php        
 │   ├── export.php
-|   |__ history.php
+│   ├── history.php
 │   ├── index.php
 │   ├── install.php
 │   ├── result.php
 │   ├── save_upload.php
 │   ├── visualisasi.php
 │   └── .gitignore
-├── eror.txt
+├── error.txt
 ├── setup_environment.bat
 └── start-server.bat
