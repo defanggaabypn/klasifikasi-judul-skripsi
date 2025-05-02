@@ -99,3 +99,12 @@ h2 {
     border-radius: 5px;
     font-size: 10pt;
 }
+
+.data-source-info {
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 15px;
+    font-size: 10pt;
+    color: #666;
+}

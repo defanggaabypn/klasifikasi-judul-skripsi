@@ -14,6 +14,7 @@ $exporter = new Exporter($database);
 // Cek tipe export
 $type = isset($_GET['type']) ? $_GET['type'] : 'excel';
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+$overview = isset($_GET['overview']) && $_GET['overview'] == '1';
 
 // Aktifkan error reporting untuk debugging
 // error_reporting(E_ALL);
@@ -81,6 +82,65 @@ if ($id > 0) {
             $database->query(
                 "UPDATE model_performances SET accuracy = ? WHERE model_name = ? AND upload_file_id = ?",
                 [$dtAccuracy, 'Decision Tree', $id]
+            );
+        }
+    }
+} else if ($overview) {
+    // Export overview/statistik global
+    // Ambil semua data prediksi
+    $sql = "
+        SELECT p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred
+        FROM predictions p
+        LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+        LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+        LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+        ORDER BY p.id DESC
+    ";
+    $data = $database->fetchAll($sql);
+    $baseFilename = 'overview_klasifikasi';
+    
+    // Hitung akurasi global
+    $totalCount = count($data);
+    $correctKNN = 0;
+    $correctDT = 0;
+    
+    if ($totalCount > 0) {
+        foreach ($data as $row) {
+            if ($row['actual'] == $row['knn_pred']) $correctKNN++;
+            if ($row['actual'] == $row['dt_pred']) $correctDT++;
+        }
+        
+        $knnAccuracy = $totalCount > 0 ? ($correctKNN / $totalCount) : 0;
+        $dtAccuracy = $totalCount > 0 ? ($correctDT / $totalCount) : 0;
+        
+        // Periksa apakah sudah ada entri global di model_performances
+        $globalPerformance = $database->fetch(
+            "SELECT id FROM model_performances WHERE upload_file_id IS NULL AND model_name = ?", 
+            ['KNN']
+        );
+        
+        if (empty($globalPerformance)) {
+            // Insert data performa global KNN
+            $database->query(
+                "INSERT INTO model_performances (model_name, accuracy) VALUES (?, ?)",
+                ['KNN', $knnAccuracy]
+            );
+            
+            // Insert data performa global Decision Tree
+            $database->query(
+                "INSERT INTO model_performances (model_name, accuracy) VALUES (?, ?)",
+                ['Decision Tree', $dtAccuracy]
+            );
+        } else {
+            // Update data performa global
+            $database->query(
+                "UPDATE model_performances SET accuracy = ? WHERE model_name = ? AND upload_file_id IS NULL",
+                [$knnAccuracy, 'KNN']
+            );
+            
+            $database->query(
+                "UPDATE model_performances SET accuracy = ? WHERE model_name = ? AND upload_file_id IS NULL",
+                [$dtAccuracy, 'Decision Tree']
             );
         }
     }
@@ -152,6 +212,8 @@ try {
             // Modifikasi class Exporter atau implementasikan metode alternatif
             // Untuk sekarang, kita tambahkan variable yang memberi tahu Exporter untuk mengambil data dari model_performances tertentu
             $file = $exporter->exportToPDF($predictionData, $pdfFilename, $id);
+        } else if ($overview) {
+            $file = $exporter->exportToPDF($predictionData, $pdfFilename, null, true);
         } else {
             $file = $exporter->exportToPDF($predictionData, $pdfFilename);
         }
@@ -174,6 +236,8 @@ try {
         if ($id > 0) {
             // Modifikasi class Exporter atau implementasikan metode alternatif
             $file = $exporter->exportToExcel($predictionData, $excelFilename, $id);
+        } else if ($overview) {
+            $file = $exporter->exportToExcel($predictionData, $excelFilename, null, true);
         } else {
             $file = $exporter->exportToExcel($predictionData, $excelFilename);
         }

@@ -16,7 +16,7 @@ class Exporter {
     }
     
     // Export hasil ke Excel
-    public function exportToExcel($predictionData, $filename = 'hasil_klasifikasi.xlsx', $upload_file_id = null) {
+    public function exportToExcel($predictionData, $filename = 'hasil_klasifikasi.xlsx', $upload_file_id = null, $isOverview = false) {
         // Buat spreadsheet baru
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
@@ -92,17 +92,32 @@ class Exporter {
         $statSheet->setTitle('Statistik');
         
         // Header statistik
-        $statSheet->setCellValue('A1', 'Statistik Hasil Klasifikasi');
+        if ($upload_file_id || $isOverview) {
+            $statSheet->setCellValue('A1', $isOverview ? 'Statistik Hasil Klasifikasi (Ringkasan Keseluruhan)' : 'Statistik Hasil Klasifikasi');
+        } else {
+            $statSheet->setCellValue('A1', 'Statistik Hasil Klasifikasi (Terbaru)');
+        }
         $statSheet->mergeCells('A1:C1');
         $statSheet->getStyle('A1')->getFont()->setBold(true);
         $statSheet->getStyle('A1')->getFont()->setSize(14);
         
-        // Data statistik
-        $statSheet->setCellValue('A3', 'Model');
-        $statSheet->setCellValue('B3', 'Akurasi');
-        $statSheet->getStyle('A3:B3')->applyFromArray($headerStyle);
+        // Tambahkan informasi sumber data
+        if ($upload_file_id) {
+            $statSheet->setCellValue('A2', 'Sumber: File spesifik');
+        } else if ($isOverview) {
+            $statSheet->setCellValue('A2', 'Sumber: Semua data dalam sistem');
+        } else {
+            $statSheet->setCellValue('A2', 'Sumber: 100 data terbaru');
+        }
+        $statSheet->mergeCells('A2:C2');
+        $statSheet->getStyle('A2')->getFont()->setItalic(true);
         
-        // Ambil statistik akurasi dari database berdasarkan upload_file_id jika ada
+        // Data statistik
+        $statSheet->setCellValue('A4', 'Model');
+        $statSheet->setCellValue('B4', 'Akurasi');
+        $statSheet->getStyle('A4:B4')->applyFromArray($headerStyle);
+        
+        // Ambil statistik akurasi dari database
         if ($upload_file_id) {
             $modelStats = $this->database->fetchAll(
                 "SELECT model_name, accuracy FROM model_performances 
@@ -110,6 +125,46 @@ class Exporter {
                  ORDER BY training_date DESC", 
                 [$upload_file_id]
             );
+        } else if ($isOverview) {
+            // Jika ini adalah overview, coba ambil statistik global terlebih dahulu
+            $globalStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 WHERE upload_file_id IS NULL
+                 ORDER BY training_date DESC"
+            );
+            
+            // Jika tidak ada statistik global, hitung akurasi dari semua data
+            if (empty($globalStats)) {
+                // Hitung akurasi global dari semua prediksi
+                $totalPredictions = $this->database->fetch(
+                    "SELECT COUNT(*) as total FROM predictions"
+                );
+                
+                $correctKNN = $this->database->fetch(
+                    "SELECT COUNT(*) as correct FROM predictions p
+                     JOIN categories c1 ON p.actual_category_id = c1.id
+                     JOIN categories c2 ON p.knn_prediction_id = c2.id
+                     WHERE c1.name = c2.name"
+                );
+                
+                $correctDT = $this->database->fetch(
+                    "SELECT COUNT(*) as correct FROM predictions p
+                     JOIN categories c1 ON p.actual_category_id = c1.id
+                     JOIN categories c3 ON p.dt_prediction_id = c3.id
+                     WHERE c1.name = c3.name"
+                );
+                
+                $totalCount = $totalPredictions['total'];
+                $knnAcc = $totalCount > 0 ? $correctKNN['correct'] / $totalCount : 0;
+                $dtAcc = $totalCount > 0 ? $correctDT['correct'] / $totalCount : 0;
+                
+                $modelStats = [
+                    ['model_name' => 'KNN', 'accuracy' => $knnAcc],
+                    ['model_name' => 'Decision Tree', 'accuracy' => $dtAcc]
+                ];
+            } else {
+                $modelStats = $globalStats;
+            }
         } else {
             // Gunakan statistik global jika tidak ada upload_file_id spesifik
             $modelStats = $this->database->fetchAll(
@@ -119,12 +174,22 @@ class Exporter {
             );
         }
         
-        $row = 4;
+        $row = 5;
         foreach ($modelStats as $stat) {
             $statSheet->setCellValue('A' . $row, $stat['model_name']);
             $statSheet->setCellValue('B' . $row, number_format($stat['accuracy'] * 100, 2) . '%');
             $row++;
         }
+        
+        // Tambahkan informasi jumlah data
+        $statSheet->setCellValue('A' . ($row + 1), 'Jumlah Data');
+        $statSheet->setCellValue('B' . ($row + 1), count($predictionData));
+        $statSheet->getStyle('A' . ($row + 1))->getFont()->setBold(true);
+        
+        // Tambahkan tanggal ekspor
+        $statSheet->setCellValue('A' . ($row + 3), 'Tanggal Ekspor');
+        $statSheet->setCellValue('B' . ($row + 3), date('d/m/Y H:i:s'));
+        $statSheet->getStyle('A' . ($row + 3))->getFont()->setBold(true);
         
         // Set sheet aktif kembali ke sheet pertama
         $spreadsheet->setActiveSheetIndex(0);
@@ -140,7 +205,7 @@ class Exporter {
     }
     
     // Export hasil ke PDF
-    public function exportToPDF($predictionData, $filename = 'hasil_klasifikasi.pdf', $upload_file_id = null) {
+    public function exportToPDF($predictionData, $filename = 'hasil_klasifikasi.pdf', $upload_file_id = null, $isOverview = false) {
         // Inisialisasi mPDF
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
@@ -157,7 +222,7 @@ class Exporter {
         $stylesheet = file_get_contents('assets/css/pdf-style.css');
         $mpdf->WriteHTML($stylesheet, \Mpdf\HTMLParserMode::HEADER_CSS);
         
-        // Ambil statistik akurasi dari database berdasarkan upload_file_id jika ada
+        // Ambil statistik akurasi dari database
         if ($upload_file_id) {
             $modelStats = $this->database->fetchAll(
                 "SELECT model_name, accuracy FROM model_performances 
@@ -165,6 +230,46 @@ class Exporter {
                  ORDER BY training_date DESC", 
                 [$upload_file_id]
             );
+        } else if ($isOverview) {
+            // Jika ini adalah overview, coba ambil statistik global terlebih dahulu
+            $globalStats = $this->database->fetchAll(
+                "SELECT model_name, accuracy FROM model_performances 
+                 WHERE upload_file_id IS NULL
+                 ORDER BY training_date DESC"
+            );
+            
+            // Jika tidak ada statistik global, hitung akurasi dari semua data
+            if (empty($globalStats)) {
+                // Hitung akurasi global dari semua prediksi
+                $totalPredictions = $this->database->fetch(
+                    "SELECT COUNT(*) as total FROM predictions"
+                );
+                
+                $correctKNN = $this->database->fetch(
+                    "SELECT COUNT(*) as correct FROM predictions p
+                     JOIN categories c1 ON p.actual_category_id = c1.id
+                     JOIN categories c2 ON p.knn_prediction_id = c2.id
+                     WHERE c1.name = c2.name"
+                );
+                
+                $correctDT = $this->database->fetch(
+                    "SELECT COUNT(*) as correct FROM predictions p
+                     JOIN categories c1 ON p.actual_category_id = c1.id
+                     JOIN categories c3 ON p.dt_prediction_id = c3.id
+                     WHERE c1.name = c3.name"
+                );
+                
+                $totalCount = $totalPredictions['total'];
+                $knnAcc = $totalCount > 0 ? $correctKNN['correct'] / $totalCount : 0;
+                $dtAcc = $totalCount > 0 ? $correctDT['correct'] / $totalCount : 0;
+                
+                $modelStats = [
+                    ['model_name' => 'KNN', 'accuracy' => $knnAcc],
+                    ['model_name' => 'Decision Tree', 'accuracy' => $dtAcc]
+                ];
+            } else {
+                $modelStats = $globalStats;
+            }
         } else {
             // Gunakan statistik global jika tidak ada upload_file_id spesifik
             $modelStats = $this->database->fetchAll(
@@ -185,11 +290,21 @@ class Exporter {
             }
         }
         
+        // Tentukan judul berdasarkan jenis ekspor
+        $title = $upload_file_id ? 'Hasil Klasifikasi Judul Skripsi' : 
+                 ($isOverview ? 'Ringkasan Klasifikasi Judul Skripsi (Keseluruhan)' : 'Hasil Klasifikasi Judul Skripsi (Terbaru)');
+        
         // Header PDF
         $html = '
         <div class="header">
-            <h1>Hasil Klasifikasi Judul Skripsi</h1>
+            <h1>' . $title . '</h1>
             <p>Diekspor pada: ' . date('d/m/Y H:i:s') . '</p>
+        </div>
+        
+        <div class="data-source-info">
+            <p><strong>Sumber Data:</strong> ' . 
+            ($upload_file_id ? 'File spesifik' : 
+             ($isOverview ? 'Semua data dalam sistem' : '100 data terbaru')) . '</p>
         </div>
         
         <div class="stat-box">
@@ -252,6 +367,8 @@ class Exporter {
         $html .= '
         <div class="footer-stats">
             <p><strong>Total Data:</strong> ' . count($predictionData) . '</p>
+            <p><strong>Jumlah Tepat (KNN):</strong> ' . floor($knn_acc * count($predictionData)) . ' (' . number_format($knn_acc * 100, 2) . '%)</p>
+            <p><strong>Jumlah Tepat (Decision Tree):</strong> ' . floor($dt_acc * count($predictionData)) . ' (' . number_format($dt_acc * 100, 2) . '%)</p>
         </div>';
         
         // Tambahkan HTML ke PDF
@@ -259,7 +376,7 @@ class Exporter {
         
         // Tambahkan header dan footer
         $mpdf->SetHeader('Sistem Klasifikasi Judul Skripsi|' . date('d/m/Y') . '|Halaman {PAGENO}');
-        $mpdf->SetFooter('Diekspor via Aplikasi Klasifikasi Judul Skripsi');
+        $mpdf->SetFooter('ANALISIS PERBANDINGAN ALGORITMA K-NEAREST NEIGHBORS (KNN) DAN DECISION TREE BERDASARKAN HASIL SEMATIC SIMILARITY JUDUL SKRIPSI DAN BIDANG KONSENSTRASI (STUDI KASUS : JURUSAN PENDIDIKAN TEKNOLOGI INFORMASI DAN KOMUNIKASI)');
         
         // Simpan ke file temporer
         $tempFile = tempnam(sys_get_temp_dir(), 'pdf_');

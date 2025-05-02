@@ -468,18 +468,18 @@ $modelPerformance = $database->fetchAll("
                                         </div>
                                         
                                         <div class="mt-4">
-                                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                                <h6 class="fw-bold">Ekspor Data</h6>
-                                            </div>
-                                            <div class="btn-group" role="group">
-                                                <a href="export.php?type=excel" class="btn btn-success">
-                                                    <i class="bi bi-file-earmark-excel me-1"></i> Ekspor Excel
-                                                </a>
-                                                <a href="export.php?type=pdf" class="btn btn-danger">
-                                                    <i class="bi bi-file-earmark-pdf me-1"></i> Ekspor PDF
-                                                </a>
-                                            </div>
-                                        </div>
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="fw-bold">Ekspor Data</h6>
+    </div>
+    <div class="btn-group" role="group">
+        <a href="export.php?type=excel&overview=1" class="btn btn-success">
+            <i class="bi bi-file-earmark-excel me-1"></i> Ekspor Excel
+        </a>
+        <a href="export.php?type=pdf&overview=1" class="btn btn-danger">
+            <i class="bi bi-file-earmark-pdf me-1"></i> Ekspor PDF
+        </a>
+    </div>
+</div>
                                     </div>
                                 </div>
                                 <?php endif; ?>
