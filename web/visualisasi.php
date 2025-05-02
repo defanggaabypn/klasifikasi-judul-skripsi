@@ -982,7 +982,7 @@ $modelPerformance = $database->fetchAll("
                 performanceData.dates.push('<?= date('d/m/Y', strtotime($perf['training_date'])) ?>');
             <?php endforeach; ?>
             
-           // Render performance chart
+                    // Render performance chart
             const perfCtx = document.getElementById('performanceChart').getContext('2d');
             new Chart(perfCtx, {
                 type: 'bar',
