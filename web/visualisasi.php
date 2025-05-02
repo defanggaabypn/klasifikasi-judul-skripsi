@@ -982,7 +982,7 @@ $modelPerformance = $database->fetchAll("
                 performanceData.dates.push('<?= date('d/m/Y', strtotime($perf['training_date'])) ?>');
             <?php endforeach; ?>
             
-            // Render performance chart
+           // Render performance chart
             const perfCtx = document.getElementById('performanceChart').getContext('2d');
             new Chart(perfCtx, {
                 type: 'bar',
@@ -1023,10 +1023,18 @@ $modelPerformance = $database->fetchAll("
                             text: 'Performa Model Klasifikasi'
                         },
                         datalabels: {
+                            anchor: 'end',          // Tetapkan anchor ke 'end' (bagian atas bar)
+                            align: 'top',           // Tetapkan align ke 'top' untuk memposisikan di atas bar
+                            offset: 4,              // Tambahkan sedikit offset agar tidak terlalu dekat dengan bar
                             formatter: (value) => value.toFixed(1) + '%',
-                            color: '#fff',
+                            color: '#495057',          // Ubah warna teks menjadi hitam agar terlihat di luar bar
                             font: {
-                                weight: 'bold'
+                                weight: 'bold',
+                                size: 11            // Ukuran font yang sesuai
+                            },
+                            padding: {
+                                top: 2,
+                                bottom: 2
                             }
                         }
                     }
