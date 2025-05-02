@@ -98,6 +98,8 @@ if ($dbStatus) {
         .table-responsive {
             border-radius: 10px;
             overflow: hidden;
+            overflow-x: auto; /* Tambahkan ini */
+            -webkit-overflow-scrolling: touch; /* Untuk performa scroll yang lebih baik di iOS */
         }
         
         .table {
