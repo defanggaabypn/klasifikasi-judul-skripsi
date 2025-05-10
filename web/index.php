@@ -266,7 +266,6 @@ try {
 </head>
 <body>
     <div id="loading">
-        <div class="spinner-border text-light loading-pulse" role="status" style="width: 3rem; height: 3rem;"></div>
         <h3 class="mt-3 text-white">Sedang Memproses...</h3>
         <p class="text-white">Ini mungkin membutuhkan waktu beberapa menit karena IndoBERT sedang menganalisis judul-judul</p>
         <div class="progress mt-3" style="width: 50%; margin: 0 auto;">

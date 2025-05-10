@@ -12,14 +12,19 @@ import os
 import pickle
 import json
 import re
-from sklearn.model_selection import train_test_split
+import random
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay, classification_report, precision_recall_fscore_support
+from sklearn.decomposition import PCA
+from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.ensemble import BaggingClassifier
 from transformers import AutoTokenizer, AutoModel
 import pymysql
 import hashlib
 from datetime import datetime
+import gc
 
 app = Flask(__name__)
 CORS(app)  # Memungkinkan request dari domain lain (PHP frontend)
@@ -52,6 +57,13 @@ for folder in [UPLOAD_FOLDER, MODEL_FOLDER, CACHE_FOLDER]:
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Konstanta untuk model
+MODEL_FILENAME = os.path.join(MODEL_FOLDER, 'models.pkl')
+PCA_FILENAME = os.path.join(MODEL_FOLDER, 'pca_model.pkl')
+SELECTOR_FILENAME = os.path.join(MODEL_FOLDER, 'feature_selector.pkl')
+EMBEDDING_CACHE_FILENAME = os.path.join(CACHE_FOLDER, 'embedding_cache.json')
+MAX_LENGTH = 64  # Mengurangi dari 128 ke 64 untuk efisiensi memori
+
 # Konfigurasi database
 DB_CONFIG = {
     'host': 'localhost',
@@ -69,6 +81,140 @@ def get_db_connection():
     except Exception as e:
         print(f"Error connecting to database: {str(e)}")
         return None
+
+# Inisialisasi model IndoBERT
+print("Loading IndoBERT model... (bisa memakan waktu beberapa menit)")
+tokenizer = AutoTokenizer.from_pretrained("indobenchmark/indobert-base-p1")
+model = AutoModel.from_pretrained("indobenchmark/indobert-base-p1")
+print("IndoBERT model loaded successfully!")
+
+# Variabel global untuk menyimpan model yang sudah dilatih
+trained_knn = None
+trained_dt = None
+pca_model = None
+feature_selector = None
+embedding_cache = {}
+train_features = []
+train_labels = []
+
+# Load embedding cache jika ada
+if os.path.exists(EMBEDDING_CACHE_FILENAME):
+    try:
+        with open(EMBEDDING_CACHE_FILENAME, 'r') as f:
+            embedding_cache = json.load(f)
+        print(f"Loaded {len(embedding_cache)} cached embeddings")
+    except Exception as e:
+        print(f"Error loading embedding cache: {str(e)}")
+        embedding_cache = {}
+
+# Load model jika ada
+if os.path.exists(MODEL_FILENAME):
+    try:
+        with open(MODEL_FILENAME, 'rb') as f:
+            models_data = pickle.load(f)
+            trained_knn = models_data.get('knn')
+            trained_dt = models_data.get('dt')
+            train_features = models_data.get('train_features', [])
+            train_labels = models_data.get('train_labels', [])
+        print("Models loaded successfully from disk")
+    except Exception as e:
+        print(f"Error loading models: {str(e)}")
+        trained_knn = None
+        trained_dt = None
+
+# Load PCA model jika ada
+if os.path.exists(PCA_FILENAME):
+    try:
+        with open(PCA_FILENAME, 'rb') as f:
+            pca_model = pickle.load(f)
+        print(f"PCA model loaded with {pca_model.n_components_} components")
+    except Exception as e:
+        print(f"Error loading PCA model: {str(e)}")
+        pca_model = None
+
+# Load feature selector jika ada
+if os.path.exists(SELECTOR_FILENAME):
+    try:
+        with open(SELECTOR_FILENAME, 'rb') as f:
+            feature_selector = pickle.load(f)
+        print(f"Feature selector loaded")
+    except Exception as e:
+        print(f"Error loading feature selector: {str(e)}")
+        feature_selector = None
+
+# Preprocessing teks yang lebih baik
+def preprocess_text(text):
+    if pd.isna(text) or not text:
+        return ""
+    
+    text = str(text).lower()
+    
+    # Hapus stopwords bahasa Indonesia
+    stopwords = ["yang", "untuk", "pada", "ke", "para", "namun", "dan", "dengan", 
+                 "dari", "di", "dalam", "secara", "oleh", "atau", "ini", "itu"]
+    
+    # Filter stopwords dengan cara yang lebih efisien
+    words = []
+    for word in text.split():
+        if word not in stopwords and len(word) > 2:  # Abaikan kata pendek
+            words.append(word)
+    
+    text = " ".join(words)
+    
+    # Hapus karakter khusus, angka dan spasi berlebih
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\d+', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+# Fungsi untuk mendapatkan embedding yang lebih baik
+def get_embedding(text):
+    preprocessed_text = preprocess_text(text)
+    
+    # Cek apakah embedding sudah ada di cache
+    cache_key = f"cls_{preprocessed_text}"
+    if cache_key in embedding_cache:
+        return np.array(embedding_cache[cache_key])
+    
+    # Jika tidak ada di cache, hitung embedding baru
+    inputs = tokenizer(preprocessed_text, return_tensors="pt", truncation=True, padding=True, max_length=MAX_LENGTH)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    
+    # Mean pooling - ambil rata-rata semua token, lebih baik dari hanya CLS token
+    attention_mask = inputs['attention_mask']
+    token_embeddings = outputs.last_hidden_state
+    
+    # Combine CLS token dengan mean pooling
+    cls_embedding = outputs.last_hidden_state[:, 0, :].squeeze().numpy()
+    
+    # Mean pooling untuk token lainnya
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+    sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+    mean_embedding = (sum_embeddings / sum_mask).squeeze().numpy()
+    
+    # Gabungkan kedua embedding
+    combined_embedding = np.concatenate([cls_embedding, mean_embedding])
+    
+    # Simpan ke cache
+    embedding_cache[cache_key] = combined_embedding.tolist()
+    
+    # Simpan cache ke disk secara periodik
+    if len(embedding_cache) % 10 == 0:
+        save_embedding_cache()
+    
+    return combined_embedding
+
+# Simpan cache embedding ke disk
+def save_embedding_cache():
+    try:
+        with open(EMBEDDING_CACHE_FILENAME, 'w') as f:
+            json.dump(embedding_cache, f)
+        print(f"Saved {len(embedding_cache)} embeddings to cache")
+    except Exception as e:
+        print(f"Error saving embedding cache: {str(e)}")
 
 # Simpan hasil prediksi ke database
 def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=0, upload_file_id=None):
@@ -181,115 +327,242 @@ def analyze_keywords(category, titles):
         print(f"Error analyzing keywords: {str(e)}")
         return False
 
-# Konstanta untuk model
-MODEL_FILENAME = os.path.join(MODEL_FOLDER, 'models.pkl')
-EMBEDDING_CACHE_FILENAME = os.path.join(CACHE_FOLDER, 'embedding_cache.json')
-MAX_LENGTH = 128  # Maximum sequence length for IndoBERT
+# Fungsi untuk menambahkan fitur domain
+def add_domain_features(title):
+    # Kata kunci spesifik domain yang sangat relevan
+    keywords = {
+        'RPL': ['sistem', 'aplikasi', 'web', 'android', 'database', 'framework', 'platform', 'informasi', 
+                'online', 'digital', 'manajemen', 'data', 'otomatisasi', 'mobile', 'komputerisasi'],
+        'Jaringan': ['jaringan', 'network', 'server', 'router', 'protokol', 'keamanan', 'vpn', 'lan', 
+                     'wan', 'topologi', 'bandwidth', 'transmisi', 'infrastruktur', 'monitoring', 'konfigurasi'],
+        'Multimedia': ['multimedia', 'game', 'animasi', 'grafis', 'audio', 'video', 'visual', 
+                       'interaktif', 'gambar', '3d', 'rendering', 'virtual', 'augmented', 'reality', 'desain']
+    }
+    
+    # Inisialisasi fitur
+    features = []
+    
+    # 1. Panjang judul (jumlah kata)
+    features.append(len(title.split()))
+    
+    # 2. Hitung kata kunci per kategori
+    title_lower = title.lower()
+    for category, words in keywords.items():
+        count = sum(1 for word in words if word in title_lower)
+        features.append(count)
+    
+    # 3. Apakah ada kata metodologi?
+    methods = ['analisis', 'perancangan', 'implementasi', 'pengembangan', 'evaluasi', 'rancang', 'bangun']
+    method_count = sum(1 for word in methods if word in title_lower)
+    features.append(method_count)
+    
+    # 4. Ciri khas tertentu (contoh: apakah judul bersifat teknis?)
+    technical_words = ['sistem', 'aplikasi', 'metode', 'algoritma', 'teknologi', 'framework', 'arsitektur']
+    tech_count = sum(1 for word in technical_words if word in title_lower)
+    features.append(tech_count)
+    
+    # 5. Rasio kata unik
+    words = title_lower.split()
+    unique_ratio = len(set(words)) / (len(words) + 1e-6)
+    features.append(unique_ratio)
+    
+    return np.array(features)
 
-# Inisialisasi model IndoBERT
-print("Loading IndoBERT model... (bisa memakan waktu beberapa menit)")
-tokenizer = AutoTokenizer.from_pretrained("indobenchmark/indobert-base-p1")
-model = AutoModel.from_pretrained("indobenchmark/indobert-base-p1")
-print("IndoBERT model loaded successfully!")
+# Gabungkan embedding dengan fitur domain
+def create_enhanced_features(embedding, title):
+    domain_features = add_domain_features(title)
+    return np.concatenate([embedding, domain_features])
 
-# Variabel global untuk menyimpan model yang sudah dilatih
-trained_knn = None
-trained_dt = None
-embedding_cache = {}
-train_features = []
-train_labels = []
+# Fungsi untuk PCA reduction
+def apply_pca(features, n_components=100, fit=False):
+    global pca_model
+    
+    features_array = np.array(features)
+    
+    if fit or pca_model is None:
+        pca_model = PCA(n_components=n_components)
+        reduced_features = pca_model.fit_transform(features_array)
+        
+        # Simpan model PCA
+        with open(PCA_FILENAME, 'wb') as f:
+            pickle.dump(pca_model, f)
+    else:
+        reduced_features = pca_model.transform(features_array)
+    
+    return reduced_features
 
-# Load embedding cache jika ada
-if os.path.exists(EMBEDDING_CACHE_FILENAME):
+# Fungsi untuk feature selection
+def select_best_features(features, labels, k=100, fit=False):
+    global feature_selector
+    
+    features_array = np.array(features)
+    
+    if fit or feature_selector is None:
+        feature_selector = SelectKBest(f_classif, k=k)
+        selected_features = feature_selector.fit_transform(features_array, labels)
+        
+        # Simpan feature selector
+        with open(SELECTOR_FILENAME, 'wb') as f:
+            pickle.dump(feature_selector, f)
+    else:
+        selected_features = feature_selector.transform(features_array)
+    
+    return selected_features
+
+# Fungsi untuk oversampling kelas minoritas
+def oversample_minority_classes(embeddings, titles, labels):
+    # Hitung jumlah sampel per kelas
+    class_counts = {}
+    for label in labels:
+        class_counts[label] = class_counts.get(label, 0) + 1
+    
+    # Tentukan kelas mayoritas dan jumlah targetnya
+    max_class_count = max(class_counts.values())
+    
+    # Data asli
+    augmented_embeddings = list(embeddings)
+    augmented_titles = list(titles)
+    augmented_labels = list(labels)
+    
+    # Simpan indeks untuk setiap kelas
+    class_indices = {}
+    for i, label in enumerate(labels):
+        if label not in class_indices:
+            class_indices[label] = []
+        class_indices[label].append(i)
+    
+    # Augmentasi data untuk kelas minoritas
+    for label, count in class_counts.items():
+        if count < max_class_count:
+            # Berapa banyak sampel yang perlu ditambahkan
+            samples_to_add = max_class_count - count
+            
+            # Tambahkan sampel dengan sedikit variasi
+            for _ in range(samples_to_add):
+                # Pilih sampel acak dari kelas ini
+                idx = random.choice(class_indices[label])
+                
+                # Tambahkan sedikit noise ke embedding
+                noise_scale = 0.01  # Skala noise
+                noise = np.random.normal(0, noise_scale, size=embeddings[idx].shape)
+                new_embedding = embeddings[idx] + noise
+                
+                # Tambahkan ke dataset
+                augmented_embeddings.append(new_embedding)
+                augmented_titles.append(titles[idx])
+                augmented_labels.append(label)
+    
+    print(f"Data asli: {len(embeddings)} sampel")
+    print(f"Data setelah oversampling: {len(augmented_embeddings)} sampel")
+    
+    return augmented_embeddings, augmented_titles, augmented_labels
+
+# Fungsi tuning untuk KNN
+def optimize_knn(X_train, y_train):
+    best_k = 3
+    best_accuracy = 0
+    best_weight = 'uniform'
+    
+    # Coba berbagai nilai k
+    for k in [1, 3, 5, 7, 9, 11, 13]:
+        for weight in ['uniform', 'distance']:
+            knn = KNeighborsClassifier(n_neighbors=k, weights=weight)
+            
+            # Cross-validation sederhana
+            kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            scores = []
+            
+            for train_idx, val_idx in kf.split(X_train, y_train):
+                X_fold_train = [X_train[i] for i in train_idx]
+                y_fold_train = [y_train[i] for i in train_idx]
+                X_fold_val = [X_train[i] for i in val_idx]
+                y_fold_val = [y_train[i] for i in val_idx]
+                
+                knn.fit(X_fold_train, y_fold_train)
+                score = accuracy_score(y_fold_val, knn.predict(X_fold_val))
+                scores.append(score)
+            
+            avg_score = np.mean(scores)
+            if avg_score > best_accuracy:
+                best_accuracy = avg_score
+                best_k = k
+                best_weight = weight
+    
+    print(f"Best KNN parameters: k={best_k}, weight={best_weight}, accuracy={best_accuracy:.4f}")
+    return KNeighborsClassifier(n_neighbors=best_k, weights=best_weight)
+
+# Fungsi tuning untuk Decision Tree
+def optimize_dt(X_train, y_train):
+    best_accuracy = 0
+    best_params = {'max_depth': None, 'criterion': 'gini', 'min_samples_split': 2}
+    
+    # Coba berbagai parameter
+    for max_depth in [None, 10, 20, 30]:
+        for criterion in ['gini', 'entropy']:
+            for min_samples_split in [2, 5, 10]:
+                # Gunakan bagging dengan decision tree
+                base_dt = DecisionTreeClassifier(
+                    max_depth=max_depth,
+                    criterion=criterion,
+                    min_samples_split=min_samples_split,
+                    random_state=42
+                )
+                
+                # Cross-validation sederhana
+                kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                scores = []
+                
+                for train_idx, val_idx in kf.split(X_train, y_train):
+                    X_fold_train = [X_train[i] for i in train_idx]
+                    y_fold_train = [y_train[i] for i in train_idx]
+                    X_fold_val = [X_train[i] for i in val_idx]
+                    y_fold_val = [y_train[i] for i in val_idx]
+                    
+                    base_dt.fit(X_fold_train, y_fold_train)
+                    score = accuracy_score(y_fold_val, base_dt.predict(X_fold_val))
+                    scores.append(score)
+                
+                avg_score = np.mean(scores)
+                if avg_score > best_accuracy:
+                    best_accuracy = avg_score
+                    best_params = {
+                        'max_depth': max_depth,
+                        'criterion': criterion,
+                        'min_samples_split': min_samples_split
+                    }
+    
+    print(f"Best DT parameters: {best_params}, accuracy={best_accuracy:.4f}")
+    return DecisionTreeClassifier(
+        max_depth=best_params['max_depth'],
+        criterion=best_params['criterion'],
+        min_samples_split=best_params['min_samples_split'],
+        random_state=42
+    )
+
+# Fungsi untuk implementasi bagging dengan DT
+def create_bagged_dt(dt_base, n_estimators=10):
+    bagged_dt = BaggingClassifier(
+        estimator=dt_base,
+        n_estimators=n_estimators,
+        random_state=42
+    )
+    return bagged_dt
+
+# Simpan model yang lebih lengkap ke disk
+def save_complete_models(models_dict):
     try:
-        with open(EMBEDDING_CACHE_FILENAME, 'r') as f:
-            embedding_cache = json.load(f)
-        print(f"Loaded {len(embedding_cache)} cached embeddings")
-    except Exception as e:
-        print(f"Error loading embedding cache: {str(e)}")
-        embedding_cache = {}
-
-# Load model jika ada
-if os.path.exists(MODEL_FILENAME):
-    try:
-        with open(MODEL_FILENAME, 'rb') as f:
-            models_data = pickle.load(f)
-            trained_knn = models_data.get('knn')
-            trained_dt = models_data.get('dt')
-            train_features = models_data.get('train_features', [])
-            train_labels = models_data.get('train_labels', [])
-        print("Models loaded successfully from disk")
-    except Exception as e:
-        print(f"Error loading models: {str(e)}")
-        trained_knn = None
-        trained_dt = None
-
-# Preprocessing teks
-def preprocess_text(text):
-    if pd.isna(text) or not text:
-        return ""
-    
-    text = str(text).lower()
-    # Hapus karakter khusus dan angka
-    text = re.sub(r'[^\w\s]', ' ', text)
-    text = re.sub(r'\d+', ' ', text)
-    # Hapus spasi berlebih
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
-
-# Fungsi untuk mendapatkan embedding dari teks dengan caching
-def get_embedding(text):
-    preprocessed_text = preprocess_text(text)
-    
-    # Cek apakah embedding sudah ada di cache
-    if preprocessed_text in embedding_cache:
-        return np.array(embedding_cache[preprocessed_text])
-    
-    # Jika tidak ada di cache, hitung embedding baru
-    inputs = tokenizer(preprocessed_text, return_tensors="pt", truncation=True, padding=True, max_length=MAX_LENGTH)
-    with torch.no_grad():
-        outputs = model(**inputs)
-    
-    cls_embedding = outputs.last_hidden_state[:, 0, :].squeeze().numpy()
-    
-    # Simpan ke cache
-    embedding_cache[preprocessed_text] = cls_embedding.tolist()
-    
-    # Simpan cache ke disk secara periodik (setiap 10 embedding baru)
-    if len(embedding_cache) % 10 == 0:
-        save_embedding_cache()
-    
-    return cls_embedding
-
-# Simpan cache embedding ke disk
-def save_embedding_cache():
-    try:
-        with open(EMBEDDING_CACHE_FILENAME, 'w') as f:
-            json.dump(embedding_cache, f)
-        print(f"Saved {len(embedding_cache)} embeddings to cache")
-    except Exception as e:
-        print(f"Error saving embedding cache: {str(e)}")
-
-# Simpan model ke disk
-def save_models(knn, dt, X_train, y_train):
-    try:
-        models_data = {
-            'knn': knn,
-            'dt': dt,
-            'train_features': X_train,
-            'train_labels': y_train
-        }
         with open(MODEL_FILENAME, 'wb') as f:
-            pickle.dump(models_data, f)
-        print("Models saved to disk successfully")
+            pickle.dump(models_dict, f)
+        print("Complete models saved successfully")
     except Exception as e:
         print(f"Error saving models: {str(e)}")
 
 # Class untuk model KNN dengan detil performa
 class KNNDetailedModel:
-    def __init__(self, n_neighbors=3):
-        self.model = KNeighborsClassifier(n_neighbors=n_neighbors)
+    def __init__(self, n_neighbors=3, weights='uniform'):
+        self.model = KNeighborsClassifier(n_neighbors=n_neighbors, weights=weights)
         self.n_neighbors = n_neighbors
+        self.weights = weights
         self.metrics = {}
         self.confusion_matrix = None
         self.classification_report = None
@@ -343,14 +616,16 @@ class KNNDetailedModel:
 
 # Class untuk Decision Tree dengan detil performa
 class DTDetailedModel:
-    def __init__(self, max_depth=None, criterion='gini', random_state=42):
+    def __init__(self, max_depth=None, criterion='gini', min_samples_split=2, random_state=42):
         self.model = DecisionTreeClassifier(
             max_depth=max_depth, 
             criterion=criterion,
+            min_samples_split=min_samples_split,
             random_state=random_state
         )
         self.max_depth = max_depth
         self.criterion = criterion
+        self.min_samples_split = min_samples_split
         self.metrics = {}
         self.confusion_matrix = None
         self.classification_report = None
@@ -361,7 +636,8 @@ class DTDetailedModel:
         self.model.fit(X_train, y_train)
         self.X_train = X_train
         self.y_train = y_train
-        self.feature_importances = self.model.feature_importances_
+        if hasattr(self.model, 'feature_importances_'):
+            self.feature_importances = self.model.feature_importances_
         
     def predict(self, X):
         return self.model.predict(X)
@@ -396,10 +672,55 @@ class DTDetailedModel:
             }
         
         # Additional DT metrics
-        self.metrics['tree_depth'] = self.model.get_depth()
-        self.metrics['n_leaves'] = self.model.get_n_leaves()
+        if hasattr(self.model, 'get_depth'):
+            self.metrics['tree_depth'] = self.model.get_depth()
+        if hasattr(self.model, 'get_n_leaves'):
+            self.metrics['n_leaves'] = self.model.get_n_leaves()
         
         return self.metrics
+
+# Class untuk Bagged Decision Tree
+class BaggedDTDetailedModel(DTDetailedModel):
+    def __init__(self, max_depth=None, criterion='gini', min_samples_split=2, random_state=42, n_estimators=10):
+        super().__init__(max_depth, criterion, min_samples_split, random_state)
+        
+        base_estimator = DecisionTreeClassifier(
+            max_depth=max_depth,
+            criterion=criterion,
+            min_samples_split=min_samples_split,
+            random_state=random_state
+        )
+        
+        self.model = BaggingClassifier(
+            estimator=base_estimator,
+            n_estimators=n_estimators,
+            random_state=random_state
+        )
+        
+        self.max_depth = max_depth
+        self.criterion = criterion
+        self.min_samples_split = min_samples_split
+        self.n_estimators = n_estimators
+        self.metrics = {}
+        self.confusion_matrix = None
+        self.classification_report = None
+        self.class_metrics = {}
+
+# Ensemble voting berdasarkan KNN dan DT
+def predict_with_ensemble(knn_model, dt_model, X):
+    knn_pred = knn_model.predict(X)
+    dt_pred = dt_model.predict(X)
+    
+    # Voting (jika sama gunakan prediksi itu, jika berbeda gunakan KNN)
+    final_pred = []
+    for i in range(len(X)):
+        if knn_pred[i] == dt_pred[i]:
+            final_pred.append(knn_pred[i])
+        else:
+            # Jika berbeda, gunakan KNN karena umumnya lebih baik
+            final_pred.append(knn_pred[i])
+    
+    return final_pred
 
 # Fungsi untuk menghasilkan gambar confusion matrix
 def generate_confusion_matrix_image(cm, labels, title, cmap):
@@ -582,22 +903,34 @@ def process_file():
             
             print(f"Menggunakan kolom '{label_column}' sebagai label kategori")
             
-            # Generate embedding untuk semua judul
-            print("Generating embeddings... (bisa memakan waktu)")
+            # Generate embedding untuk semua judul dengan batch processing
+            print("Generating embeddings in batches... (bisa memakan waktu)")
             embeddings = []
             titles = []
             labels = []
             
-            for i, row in df.iterrows():
-                title = row[title_column]
-                if pd.notna(title) and str(title).strip():  # Skip NaN atau string kosong
-                    try:
-                        embedding = get_embedding(str(title))
-                        embeddings.append(embedding)
-                        titles.append(str(title))
-                        labels.append(str(row[label_column]))
-                    except Exception as e:
-                        print(f"Error in processing title: {title}. Error: {str(e)}")
+            # Batch size untuk menghindari memory issue
+            batch_size = 10
+            
+            for i in range(0, len(df), batch_size):
+                batch_df = df.iloc[i:i+batch_size]
+                print(f"Processing batch {i//batch_size + 1}/{len(df)//batch_size + 1}")
+                
+                for _, row in batch_df.iterrows():
+                    title = row[title_column]
+                    if pd.notna(title) and str(title).strip():  # Skip NaN atau string kosong
+                        try:
+                            # Ambil embedding dan tambahkan fitur domain
+                            embedding = get_embedding(str(title))
+                            embeddings.append(embedding)
+                            titles.append(str(title))
+                            labels.append(str(row[label_column]))
+                        except Exception as e:
+                            print(f"Error in processing title: {title}. Error: {str(e)}")
+                
+                # Clean up memory
+                if i % 50 == 0 and i > 0:
+                    gc.collect()
             
             # Jika tidak ada data yang valid
             if not embeddings:
@@ -605,22 +938,64 @@ def process_file():
             
             print(f"Total data: {len(embeddings)} judul skripsi")
             
-            # Split data
-            X_train, X_test, y_train, y_test = train_test_split(
-                embeddings, labels, test_size=0.2, random_state=42
+            # Tambahkan fitur domain ke embeddings
+            print("Adding domain features...")
+            enhanced_embeddings = []
+            for i, emb in enumerate(embeddings):
+                enhanced_emb = create_enhanced_features(emb, titles[i])
+                enhanced_embeddings.append(enhanced_emb)
+            
+            # Oversampling untuk menangani class imbalance
+            print("Performing oversampling for imbalanced classes...")
+            balanced_embeddings, balanced_titles, balanced_labels = oversample_minority_classes(
+                enhanced_embeddings, titles, labels
             )
             
+            # Reduksi dimensi dengan PCA
+            print("Applying dimensionality reduction...")
+            reduced_embeddings = apply_pca(balanced_embeddings, n_components=min(100, len(balanced_embeddings[0])), fit=True)
+            
+            # Feature selection untuk memilih fitur terbaik
+            print("Selecting best features...")
+            selected_features = select_best_features(reduced_embeddings, balanced_labels, k=min(50, reduced_embeddings.shape[1]), fit=True)
+            
+            # Split data
+            print("Splitting data into train and test sets...")
+            X_train, X_test, y_train, y_test = train_test_split(
+                selected_features, balanced_labels, test_size=0.2, random_state=42, stratify=balanced_labels
+            )
+            
+            # Hyperparameter tuning untuk KNN
+            print("Optimizing KNN model...")
+            optimized_knn = optimize_knn(X_train, y_train)
+            
+            # Hyperparameter tuning untuk Decision Tree
+            print("Optimizing Decision Tree model...")
+            optimized_dt = optimize_dt(X_train, y_train)
+            
+            # Bagging untuk Decision Tree
+            print("Creating bagged Decision Tree model...")
+            bagged_dt = create_bagged_dt(optimized_dt, n_estimators=10)
+            
             print("Training KNN model...")
-            # Train KNN with detailed metrics
-            knn = KNNDetailedModel(n_neighbors=3)
+            # Train KNN with optimized parameters
+            knn = KNNDetailedModel(n_neighbors=optimized_knn.n_neighbors, weights=optimized_knn.weights)
+            knn.model = optimized_knn
             knn.fit(X_train, y_train)
             knn_metrics = knn.evaluate(X_test, y_test)
             knn_pred = knn.predict(X_test)
             knn_acc = knn_metrics['accuracy']
             
-            print("Training Decision Tree model...")
-            # Train Decision Tree with detailed metrics
-            dt = DTDetailedModel(max_depth=None, criterion='gini', random_state=42)
+            print("Training Bagged Decision Tree model...")
+            # Train Bagged Decision Tree
+            dt = BaggedDTDetailedModel(
+                max_depth=optimized_dt.max_depth if hasattr(optimized_dt, 'max_depth') else None,
+                criterion=optimized_dt.criterion if hasattr(optimized_dt, 'criterion') else 'gini',
+                min_samples_split=optimized_dt.min_samples_split if hasattr(optimized_dt, 'min_samples_split') else 2,
+                random_state=42,
+                n_estimators=10
+            )
+            dt.model = bagged_dt
             dt.fit(X_train, y_train)
             dt_metrics = dt.evaluate(X_test, y_test)
             dt_pred = dt.predict(X_test)
@@ -633,8 +1008,20 @@ def process_file():
             train_features = X_train
             train_labels = y_train
             
-            # Simpan model ke disk
-            save_models(knn.model, dt.model, X_train, y_train)
+            # Simpan model ke disk dengan semua komponen
+            models_data = {
+                'knn': knn.model,
+                'dt': dt.model,
+                'train_features': X_train,
+                'train_labels': y_train,
+                'pca_model': pca_model,
+                'feature_selector': feature_selector,
+                'preprocessing_params': {
+                    'max_length': MAX_LENGTH,
+                    'embedding_method': 'combined_pooling'
+                }
+            }
+            save_complete_models(models_data)
             
             # Simpan cache embedding ke disk
             save_embedding_cache()
@@ -686,7 +1073,7 @@ def process_file():
             plt.close()
             
             # Persiapkan hasil prediksi untuk ditampilkan
-            test_titles = [titles[i] for i in range(len(titles)) if i >= len(titles) - len(y_test)]
+            test_titles = [balanced_titles[i] for i in range(len(balanced_titles) - len(y_test), len(balanced_titles))]
             results_table = []
             
             for i in range(len(y_test)):
@@ -709,8 +1096,8 @@ def process_file():
                 'overall': dt_metrics,
                 'per_class': dt.class_metrics,
                 'classification_report': dt.classification_report,
-                'tree_depth': dt.metrics.get('tree_depth', 0),
-                'n_leaves': dt.metrics.get('n_leaves', 0)
+                'tree_depth': dt.metrics.get('tree_depth', 0) if hasattr(dt, 'metrics') else 0,
+                'n_leaves': dt.metrics.get('n_leaves', 0) if hasattr(dt, 'metrics') else 0
             }
             
             # Setelah proses klasifikasi selesai, simpan data ke database
@@ -718,9 +1105,14 @@ def process_file():
                 conn = get_db_connection()
                 if conn:
                     with conn.cursor() as cursor:
-                        # Simpan performa model
-                        save_model_performance('KNN', knn_acc, {'n_neighbors': 3})
-                        save_model_performance('Decision Tree', dt_acc, {'max_depth': dt.model.get_depth(), 'criterion': dt.criterion})
+                       # Simpan performa model
+                        save_model_performance('KNN', knn_acc, {'n_neighbors': knn.n_neighbors})
+                        save_model_performance('Decision Tree', dt_acc, {  # Diubah dari 'Bagged Decision Tree' ke 'Decision Tree'
+                            'max_depth': dt.max_depth, 
+                            'criterion': dt.criterion,
+                            'n_estimators': dt.n_estimators if hasattr(dt, 'n_estimators') else 10,
+                            'is_bagged': True  # Tambahkan flag untuk menandai bahwa ini sebenarnya bagged DT
+                        })
                         
                         # Simpan data judul dan hasil klasifikasi
                         for i, (title, label) in enumerate(zip(titles, labels)):
@@ -809,15 +1201,33 @@ def predict_title():
         # Generate embedding untuk judul baru
         embedding = get_embedding(title)
         
+        # Tambahkan fitur domain
+        enhanced_embedding = create_enhanced_features(embedding, title)
+        
+        # Terapkan PCA jika tersedia
+        if pca_model is not None:
+            reduced_embedding = pca_model.transform([enhanced_embedding])[0]
+        else:
+            reduced_embedding = enhanced_embedding
+        
+        # Terapkan feature selection jika tersedia
+        if feature_selector is not None:
+            selected_embedding = feature_selector.transform([reduced_embedding])[0]
+        else:
+            selected_embedding = reduced_embedding
+        
         # Prediksi dengan KNN
-        knn_pred = trained_knn.predict([embedding])[0]
+        knn_pred = trained_knn.predict([selected_embedding])[0]
         
         # Prediksi dengan Decision Tree
-        dt_pred = trained_dt.predict([embedding])[0]
+        dt_pred = trained_dt.predict([selected_embedding])[0]
         
         # Hitung keyakinan prediksi (untuk KNN)
-        distances, indices = trained_knn.kneighbors([embedding])
+        distances, indices = trained_knn.kneighbors([selected_embedding])
         nearest_titles = [f"Jarak: {distances[0][i]:.4f}" for i in range(len(indices[0]))]
+        
+        # Confidence score berdasarkan jarak
+        confidence = float(1.0 - distances[0][0])
         
         # Simpan cache embedding ke disk
         save_embedding_cache()
@@ -831,7 +1241,7 @@ def predict_title():
                 knn_pred,  # Gunakan knn_pred sebagai actual_category
                 knn_pred,
                 dt_pred,
-                1.0 - distances[0][0],  # Confidence berdasarkan jarak
+                confidence,
                 upload_id  # Tambahkan upload_id
             )
         except Exception as e:
@@ -844,7 +1254,7 @@ def predict_title():
             'knn_prediction': knn_pred,
             'dt_prediction': dt_pred,
             'nearest_neighbors': nearest_titles,
-            'knn_confidence': float(1.0 - distances[0][0]),  # Confidence sebagai 1 - jarak
+            'knn_confidence': confidence,
             'prediction_id': prediction_id
         })
         
@@ -869,6 +1279,20 @@ def find_similar_titles():
         # Generate embedding untuk judul
         embedding = get_embedding(title)
         
+        # Tambahkan fitur domain jika model dilatih dengan fitur tersebut
+        if pca_model is not None or feature_selector is not None:
+            enhanced_embedding = create_enhanced_features(embedding, title)
+            
+            # Terapkan PCA jika tersedia
+            if pca_model is not None:
+                embedding = pca_model.transform([enhanced_embedding])[0]
+            else:
+                embedding = enhanced_embedding
+            
+            # Terapkan feature selection jika tersedia
+            if feature_selector is not None:
+                embedding = feature_selector.transform([embedding])[0]
+        
         # Ambil semua judul dari database
         conn = get_db_connection()
         if conn:
@@ -886,6 +1310,18 @@ def find_similar_titles():
             for db_title in all_titles:
                 # Dapatkan embedding dari judul di database
                 db_embedding = get_embedding(db_title['title'])
+                
+                # Proses embedding database dengan cara yang sama
+                if pca_model is not None or feature_selector is not None:
+                    enhanced_db_embedding = create_enhanced_features(db_embedding, db_title['title'])
+                    
+                    if pca_model is not None:
+                        db_embedding = pca_model.transform([enhanced_db_embedding])[0]
+                    else:
+                        db_embedding = enhanced_db_embedding
+                    
+                    if feature_selector is not None:
+                        db_embedding = feature_selector.transform([db_embedding])[0]
                 
                 # Hitung cosine similarity
                 similarity = np.dot(embedding, db_embedding) / (np.linalg.norm(embedding) * np.linalg.norm(db_embedding))
@@ -1010,119 +1446,296 @@ def get_predictions():
 # Endpoint untuk mendapatkan detail prediksi berdasarkan ID
 @app.route('/get_prediction/<int:prediction_id>', methods=['GET'])
 def get_prediction_detail(prediction_id):
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, 
-                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                    FROM predictions p
-                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                    WHERE p.id = %s
-                """, (prediction_id,))
-                prediction = cursor.fetchone()
-                
-                if not prediction:
-                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
-                
-                # Konversi datetime ke string
-                if 'prediction_date' in prediction and prediction['prediction_date']:
-                    prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({'success': True, 'prediction': prediction})
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting prediction detail: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+   try:
+       conn = get_db_connection()
+       if conn:
+           with conn.cursor() as cursor:
+               cursor.execute("""
+                   SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                          p.confidence, p.prediction_date, 
+                          c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                   FROM predictions p
+                   LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                   LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                   LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                   WHERE p.id = %s
+               """, (prediction_id,))
+               prediction = cursor.fetchone()
+               
+               if not prediction:
+                   return jsonify({'success': False, 'error': 'Prediction not found'}), 404
+               
+               # Konversi datetime ke string
+               if 'prediction_date' in prediction and prediction['prediction_date']:
+                   prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+               
+               return jsonify({'success': True, 'prediction': prediction})
+           conn.close()
+       else:
+           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+   except Exception as e:
+       print(f"Error getting prediction detail: {str(e)}")
+       return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint baru untuk mendapatkan prediksi berdasarkan upload_id
 @app.route('/get_predictions_by_upload/<int:upload_id>', methods=['GET'])
 def get_predictions_by_upload(upload_id):
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, 
-                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                    FROM predictions p
-                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                    WHERE p.upload_file_id = %s
-                    ORDER BY p.prediction_date DESC
-                """, (upload_id,))
-                predictions = cursor.fetchall()
-                
-                # Konversi datetime ke string
-                for pred in predictions:
-                    if 'prediction_date' in pred and pred['prediction_date']:
-                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                # Dapatkan informasi file yang diupload
-                cursor.execute("""
-                    SELECT id, original_filename, file_size, upload_date, processed
-                    FROM uploaded_files
-                    WHERE id = %s
-                """, (upload_id,))
-                file_info = cursor.fetchone()
-                
-                if file_info and 'upload_date' in file_info and file_info['upload_date']:
-                    file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({
-                    'success': True, 
-                    'predictions': predictions,
-                    'file_info': file_info
-                })
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting predictions by upload: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+   try:
+       conn = get_db_connection()
+       if conn:
+           with conn.cursor() as cursor:
+               cursor.execute("""
+                   SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                          p.confidence, p.prediction_date, 
+                          c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                   FROM predictions p
+                   LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                   LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                   LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                   WHERE p.upload_file_id = %s
+                   ORDER BY p.prediction_date DESC
+               """, (upload_id,))
+               predictions = cursor.fetchall()
+               
+               # Konversi datetime ke string
+               for pred in predictions:
+                   if 'prediction_date' in pred and pred['prediction_date']:
+                       pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+               
+               # Dapatkan informasi file yang diupload
+               cursor.execute("""
+                   SELECT id, original_filename, file_size, upload_date, processed
+                   FROM uploaded_files
+                   WHERE id = %s
+               """, (upload_id,))
+               file_info = cursor.fetchone()
+               
+               if file_info and 'upload_date' in file_info and file_info['upload_date']:
+                   file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+               
+               return jsonify({
+                   'success': True, 
+                   'predictions': predictions,
+                   'file_info': file_info
+               })
+           conn.close()
+       else:
+           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+   except Exception as e:
+       print(f"Error getting predictions by upload: {str(e)}")
+       return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint untuk mendapatkan daftar file yang telah diupload
 @app.route('/get_uploaded_files', methods=['GET'])
 def get_uploaded_files():
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
-                           COUNT(p.id) as prediction_count
-                    FROM uploaded_files uf
-                    LEFT JOIN predictions p ON uf.id = p.upload_file_id
-                    GROUP BY uf.id
-                    ORDER BY uf.upload_date DESC
-                """)
-                files = cursor.fetchall()
-                
-                # Konversi datetime ke string
-                for file in files:
-                    if 'upload_date' in file and file['upload_date']:
-                        file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({'success': True, 'files': files})
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting uploaded files: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+   try:
+       conn = get_db_connection()
+       if conn:
+           with conn.cursor() as cursor:
+               cursor.execute("""
+                   SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
+                          COUNT(p.id) as prediction_count
+                   FROM uploaded_files uf
+                   LEFT JOIN predictions p ON uf.id = p.upload_file_id
+                   GROUP BY uf.id
+                   ORDER BY uf.upload_date DESC
+               """)
+               files = cursor.fetchall()
+               
+               # Konversi datetime ke string
+               for file in files:
+                   if 'upload_date' in file and file['upload_date']:
+                       file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+               
+               return jsonify({'success': True, 'files': files})
+           conn.close()
+       else:
+           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+   except Exception as e:
+       print(f"Error getting uploaded files: {str(e)}")
+       return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint untuk mengecek status model dan akurasi terkini
+@app.route('/model_status', methods=['GET'])
+def get_model_status():
+   try:
+       # Cek apakah model sudah dilatih
+       if trained_knn is None or trained_dt is None:
+           return jsonify({
+               'success': True,
+               'models_trained': False,
+               'message': 'Models have not been trained yet.'
+           })
+       
+       # Ambil performa model terakhir dari database
+       conn = get_db_connection()
+       if conn:
+           with conn.cursor() as cursor:
+               cursor.execute("""
+                   SELECT model_name, accuracy, parameters, created_at
+                   FROM model_performances
+                   ORDER BY created_at DESC
+                   LIMIT 2
+               """)
+               performances = cursor.fetchall()
+               
+               # Konversi datetime ke string
+               for perf in performances:
+                   if 'created_at' in perf and perf['created_at']:
+                       perf['created_at'] = perf['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+               
+               # Buat statistik model
+               model_stats = {
+                   'models_trained': True,
+                   'knn_params': None,
+                   'dt_params': None,
+                   'knn_accuracy': None,
+                   'dt_accuracy': None,
+                   'last_trained': None,
+                   'embedding_cache_size': len(embedding_cache),
+                   'train_data_size': len(train_features) if train_features else 0
+               }
+               
+               # Tambahkan informasi performa
+               for perf in performances:
+                   if 'KNN' in perf['model_name']:
+                       model_stats['knn_params'] = perf['parameters']
+                       model_stats['knn_accuracy'] = perf['accuracy']
+                       model_stats['last_trained'] = perf['created_at']
+                   elif 'Tree' in perf['model_name'] or 'DT' in perf['model_name']:
+                       model_stats['dt_params'] = perf['parameters']
+                       model_stats['dt_accuracy'] = perf['accuracy']
+                       if not model_stats['last_trained']:
+                           model_stats['last_trained'] = perf['created_at']
+           
+           # Tambahkan info kategori
+           with conn.cursor() as cursor:
+               cursor.execute("SELECT name FROM categories")
+               categories = cursor.fetchall()
+               model_stats['available_categories'] = [cat['name'] for cat in categories]
+           
+           conn.close()
+           return jsonify({'success': True, **model_stats})
+       else:
+           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+   
+   except Exception as e:
+       print(f"Error checking model status: {str(e)}")
+       return jsonify({'success': False, 'error': str(e)}), 500
+
+# Endpoint baru untuk model tuning manual (untuk percobaan parameter)
+@app.route('/tune_model', methods=['POST'])
+def tune_model():
+   data = request.json
+   
+   if not data:
+       return jsonify({'error': 'No parameters provided'}), 400
+   
+   try:
+       # Cek apakah data training tersedia
+       if not train_features or not train_labels:
+           return jsonify({'error': 'No training data available. Please upload and process data first.'}), 400
+       
+       # Parameter untuk tuning
+       knn_params = data.get('knn', {})
+       dt_params = data.get('dt', {})
+       
+       # Default values jika tidak ada
+       n_neighbors = knn_params.get('n_neighbors', 3)
+       weights = knn_params.get('weights', 'uniform')
+       max_depth = dt_params.get('max_depth', None)
+       criterion = dt_params.get('criterion', 'gini')
+       min_samples_split = dt_params.get('min_samples_split', 2)
+       use_bagging = dt_params.get('use_bagging', True)
+       n_estimators = dt_params.get('n_estimators', 10)
+       
+       # Bagi data menjadi train dan test (gunakan yang sudah ada)
+       X_train, X_test, y_train, y_test = train_test_split(
+           train_features, train_labels, test_size=0.2, random_state=42, stratify=train_labels
+       )
+       
+       # Train KNN dengan parameter yang diberikan
+       print(f"Training KNN with n_neighbors={n_neighbors}, weights={weights}")
+       knn = KNNDetailedModel(n_neighbors=n_neighbors, weights=weights)
+       knn.fit(X_train, y_train)
+       knn_metrics = knn.evaluate(X_test, y_test)
+       knn_acc = knn_metrics['accuracy']
+       
+       # Train Decision Tree dengan parameter yang diberikan
+       print(f"Training DT with max_depth={max_depth}, criterion={criterion}, min_samples_split={min_samples_split}")
+       if use_bagging:
+           dt = BaggedDTDetailedModel(
+               max_depth=max_depth,
+               criterion=criterion,
+               min_samples_split=min_samples_split,
+               random_state=42,
+               n_estimators=n_estimators
+           )
+       else:
+           dt = DTDetailedModel(
+               max_depth=max_depth,
+               criterion=criterion,
+               random_state=42
+           )
+       
+       dt.fit(X_train, y_train)
+       dt_metrics = dt.evaluate(X_test, y_test)
+       dt_acc = dt_metrics['accuracy']
+       
+       # Simpan performa ke database
+       save_model_performance('KNN (Manual Tuning)', knn_acc, {'n_neighbors': n_neighbors, 'weights': weights})
+       
+       dt_perf_params = {
+           'max_depth': max_depth, 
+           'criterion': criterion,
+           'min_samples_split': min_samples_split
+       }
+       if use_bagging:
+           dt_perf_params['use_bagging'] = True
+           dt_perf_params['n_estimators'] = n_estimators
+           
+       save_model_performance('Decision Tree (Manual Tuning)', dt_acc, dt_perf_params)
+       
+       # Simpan model jika akurasi lebih baik dari yang ada
+       global trained_knn, trained_dt
+       
+       if trained_knn is None or knn_acc > 0.8:  # Hanya simpan jika akurasi >80% atau tidak ada model sebelumnya
+           trained_knn = knn.model
+           trained_dt = dt.model
+           
+           # Simpan model ke disk
+           models_data = {
+               'knn': knn.model,
+               'dt': dt.model,
+               'train_features': train_features,
+               'train_labels': train_labels,
+               'pca_model': pca_model,
+               'feature_selector': feature_selector,
+               'preprocessing_params': {
+                   'max_length': MAX_LENGTH,
+                   'embedding_method': 'combined_pooling'
+               }
+           }
+           save_complete_models(models_data)
+       
+       # Kirim hasil
+       return jsonify({
+           'success': True,
+           'knn_accuracy': knn_acc,
+           'dt_accuracy': dt_acc,
+           'knn_parameters': {'n_neighbors': n_neighbors, 'weights': weights},
+           'dt_parameters': dt_perf_params,
+           'models_saved': knn_acc > 0.8 or trained_knn is None
+       })
+       
+   except Exception as e:
+       print(f"Error tuning model: {str(e)}")
+       return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    print(f"Server starting on http://localhost:5000")
-    print(f"Upload folder: {UPLOAD_FOLDER}")
-    print(f"Model folder: {MODEL_FOLDER}")
-    print(f"Cache folder: {CACHE_FOLDER}")
-    # Jalankan server dalam mode non-threaded untuk menghindari masalah dengan matplotlib
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=False)
+   print(f"Server starting on http://localhost:5000")
+   print(f"Upload folder: {UPLOAD_FOLDER}")
+   print(f"Model folder: {MODEL_FOLDER}")
+   print(f"Cache folder: {CACHE_FOLDER}")
+   # Jalankan server dalam mode non-threaded untuk menghindari masalah dengan matplotlib
+   app.run(debug=True, host='0.0.0.0', port=5000, threaded=False)   
