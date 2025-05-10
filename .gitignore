@@ -1,1 +1,8 @@
-venv/
+# Virtual environment
+*/venv/
+
+# Cache files
+*/cache/embedding_cache.json
+
+# Model files
+*/models/*.pkl
