@@ -49,12 +49,15 @@ if (isset($_GET['id']) && !empty($_GET['id'])) {
             // 6. Hapus predictions yang terkait dengan file ini
             $database->query("DELETE FROM predictions WHERE upload_file_id = ?", [$id]);
             
-            // 7. Jika ada file fisik yang perlu dihapus
+            // 7. TAMBAHKAN: Hapus model_visualizations yang terkait dengan file ini
+            $database->query("DELETE FROM model_visualizations WHERE upload_file_id = ?", [$id]);
+            
+            // 8. Jika ada file fisik yang perlu dihapus
             if (isset($fileInfo['filename']) && file_exists($fileInfo['filename'])) {
                 unlink($fileInfo['filename']);
             }
             
-            // 8. Hapus file upload dari database
+            // 9. Hapus file upload dari database
             $success = $database->query("DELETE FROM uploaded_files WHERE id = ?", [$id]);
             
             // Commit transaksi jika semua berhasil

@@ -256,9 +256,9 @@ def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=
                         # Simpan ke classification_results
                         cursor.execute("""
                             INSERT INTO classification_results 
-                            (title_id, knn_prediction_id, dt_prediction_id, confidence)
-                            VALUES (%s, %s, %s, %s)
-                        """, (title_id, knn_id, dt_id, confidence))
+                            (title_id, knn_prediction_id, dt_prediction_id, confidence, ensemble_prediction_id)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (title_id, knn_id, dt_id, confidence, knn_id))  # Menggunakan knn_id sebagai ensemble_prediction
                         
                         conn.commit()
                 
@@ -269,15 +269,15 @@ def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=
         return None
 
 # Simpan performa model ke database
-def save_model_performance(model_name, accuracy, parameters=None):
+def save_model_performance(model_name, accuracy, parameters=None, upload_file_id=None):
     try:
         conn = get_db_connection()
         if conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO model_performances (model_name, accuracy, parameters)
-                    VALUES (%s, %s, %s)
-                """, (model_name, accuracy, json.dumps(parameters) if parameters else None))
+                    INSERT INTO model_performances (model_name, accuracy, parameters, upload_file_id)
+                    VALUES (%s, %s, %s, %s)
+                """, (model_name, accuracy, json.dumps(parameters) if parameters else None, upload_file_id))
                 
                 conn.commit()
                 return cursor.lastrowid
@@ -287,7 +287,7 @@ def save_model_performance(model_name, accuracy, parameters=None):
         return None
 
 # Analisis kata kunci dan simpan ke database
-def analyze_keywords(category, titles):
+def analyze_keywords(category, titles, upload_file_id=None):
     try:
         # Preprocess dan ekstrak keyword
         keywords = {}
@@ -310,15 +310,20 @@ def analyze_keywords(category, titles):
                 category_id = category_result['id'] if category_result else None
                 
                 if category_id:
-                    # Hapus analisis sebelumnya
-                    cursor.execute("DELETE FROM keyword_analysis WHERE category_id = %s", (category_id,))
+                    # Hapus analisis sebelumnya untuk kategori ini dan upload_id ini jika ada
+                    if upload_file_id:
+                        cursor.execute("DELETE FROM keyword_analysis WHERE category_id = %s AND upload_file_id = %s", 
+                                     (category_id, upload_file_id))
+                    else:
+                        cursor.execute("DELETE FROM keyword_analysis WHERE category_id = %s AND upload_file_id IS NULL", 
+                                     (category_id,))
                     
                     # Simpan keyword baru
                     for keyword, frequency in top_keywords:
                         cursor.execute("""
-                            INSERT INTO keyword_analysis (category_id, keyword, frequency)
-                            VALUES (%s, %s, %s)
-                        """, (category_id, keyword, frequency))
+                            INSERT INTO keyword_analysis (category_id, keyword, frequency, upload_file_id)
+                            VALUES (%s, %s, %s, %s)
+                        """, (category_id, keyword, frequency, upload_file_id))
                     
                     conn.commit()
                     return True
@@ -1105,16 +1110,16 @@ def process_file():
                 conn = get_db_connection()
                 if conn:
                     with conn.cursor() as cursor:
-                       # Simpan performa model
-                        save_model_performance('KNN', knn_acc, {'n_neighbors': knn.n_neighbors})
-                        save_model_performance('Decision Tree', dt_acc, {  # Diubah dari 'Bagged Decision Tree' ke 'Decision Tree'
+                       # Simpan performa model dengan upload_id
+                        save_model_performance('KNN', knn_acc, {'n_neighbors': knn.n_neighbors}, upload_id)
+                        save_model_performance('Decision Tree', dt_acc, {  
                             'max_depth': dt.max_depth, 
                             'criterion': dt.criterion,
                             'n_estimators': dt.n_estimators if hasattr(dt, 'n_estimators') else 10,
-                            'is_bagged': True  # Tambahkan flag untuk menandai bahwa ini sebenarnya bagged DT
-                        })
+                            'is_bagged': True  
+                        }, upload_id)
                         
-                        # Simpan data judul dan hasil klasifikasi
+                        # Simpan data judul dan hasil klasifikasi dengan upload_id
                         for i, (title, label) in enumerate(zip(titles, labels)):
                             # Dapatkan ID kategori
                             cursor.execute("SELECT id FROM categories WHERE name = %s", (label,))
@@ -1127,13 +1132,13 @@ def process_file():
                                 existing = cursor.fetchone()
                                 
                                 if not existing:
-                                    # Simpan judul baru
+                                    # Simpan judul baru dengan upload_id
                                     cursor.execute("""
-                                        INSERT INTO thesis_titles (title, category_id)
-                                        VALUES (%s, %s)
-                                    """, (title, category_id))
+                                        INSERT INTO thesis_titles (title, category_id, upload_file_id)
+                                        VALUES (%s, %s, %s)
+                                    """, (title, category_id, upload_id))
                         
-                        # Simpan hasil prediksi test set
+                        # Simpan hasil prediksi test set dengan upload_id
                         for i, result in enumerate(results_table):
                             save_prediction_to_db(
                                 result['full_title'], 
@@ -1146,10 +1151,10 @@ def process_file():
                         
                         conn.commit()
                         
-                        # Analisis kata kunci per kategori
+                        # Analisis kata kunci per kategori dengan upload_id
                         for category in unique_labels:
                             category_titles = [titles[i] for i in range(len(titles)) if labels[i] == category]
-                            analyze_keywords(category, category_titles)
+                            analyze_keywords(category, category_titles, upload_id)
                             
                         # Update status file upload menjadi processed
                         if upload_id:
@@ -1161,29 +1166,63 @@ def process_file():
             
             print("Processing completed successfully!")
             
-            # Simpan visualisasi ke database
+            # Simpan visualisasi ke database jika tabel model_visualizations ada
             try:
                 conn = get_db_connection()
                 if conn:
                     with conn.cursor() as cursor:
-                        # Simpan visualisasi ke database
-                        cursor.execute("""
-                            INSERT INTO model_visualizations 
-                            (upload_file_id, knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img)
-                            VALUES (%s, %s, %s, %s, %s)
-                        """, (
-                            upload_id,
-                            knn_cm_img,
-                            dt_cm_img,
-                            performance_comparison_img,
-                            accuracy_img
-                        ))
+                        # Cek apakah tabel model_visualizations ada
+                        cursor.execute("SHOW TABLES LIKE 'model_visualizations'")
+                        table_exists = cursor.fetchone()
                         
-                        conn.commit()
-                        print("Visualizations saved to database successfully")
+                        # Debug logs
+                        print(f"Upload ID for visualizations: {upload_id}")
+                        print(f"KNN CM Image size: {len(knn_cm_img) if knn_cm_img else 'None'}")
+                        print(f"DT CM Image size: {len(dt_cm_img) if dt_cm_img else 'None'}")
+                        
+                        if table_exists:
+                            # Cek apakah sudah ada entri untuk upload_id ini
+                            if upload_id:
+                                cursor.execute("SELECT id FROM model_visualizations WHERE upload_file_id = %s", (upload_id,))
+                                existing = cursor.fetchone()
+                                
+                                if existing:
+                                    # Update visualisasi yang sudah ada
+                                    cursor.execute("""
+                                        UPDATE model_visualizations 
+                                        SET knn_cm_img = %s, dt_cm_img = %s, performance_comparison_img = %s, accuracy_img = %s 
+                                        WHERE upload_file_id = %s
+                                    """, (
+                                        knn_cm_img,
+                                        dt_cm_img,
+                                        performance_comparison_img,
+                                        accuracy_img,
+                                        upload_id
+                                    ))
+                                else:
+                                    # Simpan visualisasi baru
+                                    cursor.execute("""
+                                        INSERT INTO model_visualizations 
+                                        (upload_file_id, knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img)
+                                        VALUES (%s, %s, %s, %s, %s)
+                                    """, (
+                                        upload_id,
+                                        knn_cm_img,
+                                        dt_cm_img,
+                                        performance_comparison_img,
+                                        accuracy_img
+                                    ))
+                                
+                                conn.commit()
+                                print(f"Visualizations saved to database successfully for upload_id: {upload_id}")
+                            else:
+                                print("Warning: No upload_id available, skipping visualization save")
                     conn.close()
             except Exception as e:
                 print(f"Error saving visualizations to database: {str(e)}")
+                # Print full stack trace for better debugging
+                import traceback
+                traceback.print_exc()
 
             # Kirim hasil ke frontend dengan konversi nilai numpy
             return jsonify(convert_numpy_types({
@@ -1299,6 +1338,7 @@ def find_similar_titles():
     try:
         title = data['title']
         limit = data.get('limit', 5)  # Default 5 hasil
+        upload_id = data.get('upload_id')  # Tambahkan parameter upload_id
         
         # Generate embedding untuk judul
         embedding = get_embedding(title)
@@ -1369,6 +1409,26 @@ def find_similar_titles():
             
             # Batasi jumlah hasil
             similar_titles = similarities[:limit]
+            
+            # Simpan pencarian ke database jika fitur search_history ada
+            try:
+                conn = get_db_connection()
+                if conn:
+                    with conn.cursor() as cursor:
+                        # Cek apakah tabel search_history ada
+                        cursor.execute("SHOW TABLES LIKE 'search_history'")
+                        table_exists = cursor.fetchone()
+                        
+                        if table_exists:
+                            # Simpan pencarian
+                            cursor.execute("""
+                                INSERT INTO search_history (query, predicted_category, upload_file_id)
+                                VALUES (%s, %s, %s)
+                            """, (title, predicted_category, upload_id))
+                            conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"Error saving search history: {str(e)}")
             
             # Kirim hasil ke frontend dengan konversi nilai numpy
             return jsonify(convert_numpy_types({
@@ -1470,296 +1530,299 @@ def get_predictions():
 # Endpoint untuk mendapatkan detail prediksi berdasarkan ID
 @app.route('/get_prediction/<int:prediction_id>', methods=['GET'])
 def get_prediction_detail(prediction_id):
-   try:
-       conn = get_db_connection()
-       if conn:
-           with conn.cursor() as cursor:
-               cursor.execute("""
-                   SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                          p.confidence, p.prediction_date, 
-                          c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                   FROM predictions p
-                   LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                   LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                   LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                   WHERE p.id = %s
-               """, (prediction_id,))
-               prediction = cursor.fetchone()
-               
-               if not prediction:
-                   return jsonify({'success': False, 'error': 'Prediction not found'}), 404
-               
-               # Konversi datetime ke string
-               if 'prediction_date' in prediction and prediction['prediction_date']:
-                   prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-               
-               return jsonify({'success': True, 'prediction': prediction})
-           conn.close()
-       else:
-           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-   except Exception as e:
-       print(f"Error getting prediction detail: {str(e)}")
-       return jsonify({'success': False, 'error': str(e)}), 500
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                           p.confidence, p.prediction_date, p.upload_file_id,
+                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    WHERE p.id = %s
+                """, (prediction_id,))
+                prediction = cursor.fetchone()
+                
+                if not prediction:
+                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
+                
+                # Konversi datetime ke string
+                if 'prediction_date' in prediction and prediction['prediction_date']:
+                    prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({'success': True, 'prediction': prediction})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting prediction detail: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint baru untuk mendapatkan prediksi berdasarkan upload_id
 @app.route('/get_predictions_by_upload/<int:upload_id>', methods=['GET'])
 def get_predictions_by_upload(upload_id):
-   try:
-       conn = get_db_connection()
-       if conn:
-           with conn.cursor() as cursor:
-               cursor.execute("""
-                   SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                          p.confidence, p.prediction_date, 
-                          c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                   FROM predictions p
-                   LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                   LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                   LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                   WHERE p.upload_file_id = %s
-                   ORDER BY p.prediction_date DESC
-               """, (upload_id,))
-               predictions = cursor.fetchall()
-               
-               # Konversi datetime ke string
-               for pred in predictions:
-                   if 'prediction_date' in pred and pred['prediction_date']:
-                       pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-               
-               # Dapatkan informasi file yang diupload
-               cursor.execute("""
-                   SELECT id, original_filename, file_size, upload_date, processed
-                   FROM uploaded_files
-                   WHERE id = %s
-               """, (upload_id,))
-               file_info = cursor.fetchone()
-               
-               if file_info and 'upload_date' in file_info and file_info['upload_date']:
-                   file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-               
-               return jsonify({
-                   'success': True, 
-                   'predictions': predictions,
-                   'file_info': file_info
-               })
-           conn.close()
-       else:
-           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-   except Exception as e:
-       print(f"Error getting predictions by upload: {str(e)}")
-       return jsonify({'success': False, 'error': str(e)}), 500
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
+                           p.confidence, p.prediction_date, 
+                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    WHERE p.upload_file_id = %s
+                    ORDER BY p.prediction_date DESC
+                """, (upload_id,))
+                predictions = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for pred in predictions:
+                    if 'prediction_date' in pred and pred['prediction_date']:
+                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Dapatkan informasi file yang diupload
+                cursor.execute("""
+                    SELECT id, original_filename, file_size, upload_date, processed
+                    FROM uploaded_files
+                    WHERE id = %s
+                """, (upload_id,))
+                file_info = cursor.fetchone()
+                
+                if file_info and 'upload_date' in file_info and file_info['upload_date']:
+                    file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({
+                    'success': True, 
+                    'predictions': predictions,
+                    'file_info': file_info
+                })
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting predictions by upload: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint untuk mendapatkan daftar file yang telah diupload
 @app.route('/get_uploaded_files', methods=['GET'])
 def get_uploaded_files():
-   try:
-       conn = get_db_connection()
-       if conn:
-           with conn.cursor() as cursor:
-               cursor.execute("""
-                   SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
-                          COUNT(p.id) as prediction_count
-                   FROM uploaded_files uf
-                   LEFT JOIN predictions p ON uf.id = p.upload_file_id
-                   GROUP BY uf.id
-                   ORDER BY uf.upload_date DESC
-               """)
-               files = cursor.fetchall()
-               
-               # Konversi datetime ke string
-               for file in files:
-                   if 'upload_date' in file and file['upload_date']:
-                       file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-               
-               return jsonify({'success': True, 'files': files})
-           conn.close()
-       else:
-           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-   except Exception as e:
-       print(f"Error getting uploaded files: {str(e)}")
-       return jsonify({'success': False, 'error': str(e)}), 500
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
+                           COUNT(p.id) as prediction_count
+                    FROM uploaded_files uf
+                    LEFT JOIN predictions p ON uf.id = p.upload_file_id
+                    GROUP BY uf.id
+                    ORDER BY uf.upload_date DESC
+                """)
+                files = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for file in files:
+                    if 'upload_date' in file and file['upload_date']:
+                        file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                return jsonify({'success': True, 'files': files})
+            conn.close()
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    except Exception as e:
+        print(f"Error getting uploaded files: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint untuk mengecek status model dan akurasi terkini
 @app.route('/model_status', methods=['GET'])
 def get_model_status():
-   try:
-       # Cek apakah model sudah dilatih
-       if trained_knn is None or trained_dt is None:
-           return jsonify({
-               'success': True,
-               'models_trained': False,
-               'message': 'Models have not been trained yet.'
-           })
-       
-       # Ambil performa model terakhir dari database
-       conn = get_db_connection()
-       if conn:
-           with conn.cursor() as cursor:
-               cursor.execute("""
-                   SELECT model_name, accuracy, parameters, created_at
-                   FROM model_performances
-                   ORDER BY created_at DESC
-                   LIMIT 2
-               """)
-               performances = cursor.fetchall()
-               
-               # Konversi datetime ke string
-               for perf in performances:
-                   if 'created_at' in perf and perf['created_at']:
-                       perf['created_at'] = perf['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-               
-               # Buat statistik model
-               model_stats = {
-                   'models_trained': True,
-                   'knn_params': None,
-                   'dt_params': None,
-                   'knn_accuracy': None,
-                   'dt_accuracy': None,
-                   'last_trained': None,
-                   'embedding_cache_size': len(embedding_cache),
-                   'train_data_size': len(train_features) if train_features else 0
-               }
-               
-               # Tambahkan informasi performa
-               for perf in performances:
-                   if 'KNN' in perf['model_name']:
-                       model_stats['knn_params'] = perf['parameters']
-                       model_stats['knn_accuracy'] = perf['accuracy']
-                       model_stats['last_trained'] = perf['created_at']
-                   elif 'Tree' in perf['model_name'] or 'DT' in perf['model_name']:
-                       model_stats['dt_params'] = perf['parameters']
-                       model_stats['dt_accuracy'] = perf['accuracy']
-                       if not model_stats['last_trained']:
-                           model_stats['last_trained'] = perf['created_at']
-           
-           # Tambahkan info kategori
-           with conn.cursor() as cursor:
-               cursor.execute("SELECT name FROM categories")
-               categories = cursor.fetchall()
-               model_stats['available_categories'] = [cat['name'] for cat in categories]
-           
-           conn.close()
-           return jsonify({'success': True, **model_stats})
-       else:
-           return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-   
-   except Exception as e:
-       print(f"Error checking model status: {str(e)}")
-       return jsonify({'success': False, 'error': str(e)}), 500
+    try:
+        # Cek apakah model sudah dilatih
+        if trained_knn is None or trained_dt is None:
+            return jsonify({
+                'success': True,
+                'models_trained': False,
+                'message': 'Models have not been trained yet.'
+            })
+        
+        # Ambil performa model terakhir dari database
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT model_name, accuracy, parameters, created_at
+                    FROM model_performances
+                    ORDER BY created_at DESC
+                    LIMIT 2
+                """)
+                performances = cursor.fetchall()
+                
+                # Konversi datetime ke string
+                for perf in performances:
+                    if 'created_at' in perf and perf['created_at']:
+                        perf['created_at'] = perf['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Buat statistik model
+                model_stats = {
+                    'models_trained': True,
+                    'knn_params': None,
+                    'dt_params': None,
+                    'knn_accuracy': None,
+                    'dt_accuracy': None,
+                    'last_trained': None,
+                    'embedding_cache_size': len(embedding_cache),
+                    'train_data_size': len(train_features) if train_features else 0
+                }
+                
+                # Tambahkan informasi performa
+                for perf in performances:
+                    if 'KNN' in perf['model_name']:
+                        model_stats['knn_params'] = perf['parameters']
+                        model_stats['knn_accuracy'] = perf['accuracy']
+                        model_stats['last_trained'] = perf['created_at']
+                    elif 'Tree' in perf['model_name'] or 'DT' in perf['model_name']:
+                        model_stats['dt_params'] = perf['parameters']
+                        model_stats['dt_accuracy'] = perf['accuracy']
+                        if not model_stats['last_trained']:
+                            model_stats['last_trained'] = perf['created_at']
+            
+            # Tambahkan info kategori
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT name FROM categories")
+                categories = cursor.fetchall()
+                model_stats['available_categories'] = [cat['name'] for cat in categories]
+            
+            conn.close()
+            return jsonify({'success': True, **model_stats})
+        else:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+    
+    except Exception as e:
+        print(f"Error checking model status: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Endpoint baru untuk model tuning manual (untuk percobaan parameter)
 @app.route('/tune_model', methods=['POST'])
 def tune_model():
-   data = request.json
-   
-   if not data:
-       return jsonify({'error': 'No parameters provided'}), 400
-   
-   try:
-       # Cek apakah data training tersedia
-       if not train_features or not train_labels:
-           return jsonify({'error': 'No training data available. Please upload and process data first.'}), 400
-       
-       # Parameter untuk tuning
-       knn_params = data.get('knn', {})
-       dt_params = data.get('dt', {})
-       
-       # Default values jika tidak ada
-       n_neighbors = knn_params.get('n_neighbors', 3)
-       weights = knn_params.get('weights', 'uniform')
-       max_depth = dt_params.get('max_depth', None)
-       criterion = dt_params.get('criterion', 'gini')
-       min_samples_split = dt_params.get('min_samples_split', 2)
-       use_bagging = dt_params.get('use_bagging', True)
-       n_estimators = dt_params.get('n_estimators', 10)
-       
-       # Bagi data menjadi train dan test (gunakan yang sudah ada)
-       X_train, X_test, y_train, y_test = train_test_split(
-           train_features, train_labels, test_size=0.2, random_state=42, stratify=train_labels
-       )
-       
-       # Train KNN dengan parameter yang diberikan
-       print(f"Training KNN with n_neighbors={n_neighbors}, weights={weights}")
-       knn = KNNDetailedModel(n_neighbors=n_neighbors, weights=weights)
-       knn.fit(X_train, y_train)
-       knn_metrics = knn.evaluate(X_test, y_test)
-       knn_acc = knn_metrics['accuracy']
-       
-       # Train Decision Tree dengan parameter yang diberikan
-       print(f"Training DT with max_depth={max_depth}, criterion={criterion}, min_samples_split={min_samples_split}")
-       if use_bagging:
-           dt = BaggedDTDetailedModel(
-               max_depth=max_depth,
-               criterion=criterion,
-               min_samples_split=min_samples_split,
-               random_state=42,
-               n_estimators=n_estimators
-           )
-       else:
-           dt = DTDetailedModel(
-               max_depth=max_depth,
-               criterion=criterion,
-               random_state=42
-           )
-       
-       dt.fit(X_train, y_train)
-       dt_metrics = dt.evaluate(X_test, y_test)
-       dt_acc = dt_metrics['accuracy']
-       
-       # Simpan performa ke database
-       save_model_performance('KNN (Manual Tuning)', knn_acc, {'n_neighbors': n_neighbors, 'weights': weights})
-       
-       dt_perf_params = {
-           'max_depth': max_depth, 
-           'criterion': criterion,
-           'min_samples_split': min_samples_split
-       }
-       if use_bagging:
-           dt_perf_params['use_bagging'] = True
-           dt_perf_params['n_estimators'] = n_estimators
-           
-       save_model_performance('Decision Tree (Manual Tuning)', dt_acc, dt_perf_params)
-       
-       # Simpan model jika akurasi lebih baik dari yang ada
-       global trained_knn, trained_dt
-       
-       if trained_knn is None or knn_acc > 0.8:  # Hanya simpan jika akurasi >80% atau tidak ada model sebelumnya
-           trained_knn = knn.model
-           trained_dt = dt.model
-           
-           # Simpan model ke disk
-           models_data = {
-               'knn': knn.model,
-               'dt': dt.model,
-               'train_features': train_features,
-               'train_labels': train_labels,
-               'pca_model': pca_model,
-               'feature_selector': feature_selector,
-               'preprocessing_params': {
-                   'max_length': MAX_LENGTH,
-                   'embedding_method': 'combined_pooling'
-               }
-           }
-           save_complete_models(models_data)
-       
-       # Kirim hasil
-       return jsonify({
-           'success': True,
-           'knn_accuracy': knn_acc,
-           'dt_accuracy': dt_acc,
-           'knn_parameters': {'n_neighbors': n_neighbors, 'weights': weights},
-           'dt_parameters': dt_perf_params,
-           'models_saved': knn_acc > 0.8 or trained_knn is None
-       })
-       
-   except Exception as e:
-       print(f"Error tuning model: {str(e)}")
-       return jsonify({'success': False, 'error': str(e)}), 500
+    data = request.json
+    
+    if not data:
+        return jsonify({'error': 'No parameters provided'}), 400
+    
+    try:
+        # Cek apakah data training tersedia
+        if not train_features or not train_labels:
+            return jsonify({'error': 'No training data available. Please upload and process data first.'}), 400
+        
+        # Parameter untuk tuning
+        knn_params = data.get('knn', {})
+        dt_params = data.get('dt', {})
+        upload_id = data.get('upload_id')  # Ambil upload_id jika ada
+        
+        # Default values jika tidak ada
+        n_neighbors = knn_params.get('n_neighbors', 3)
+        weights = knn_params.get('weights', 'uniform')
+        max_depth = dt_params.get('max_depth', None)
+        criterion = dt_params.get('criterion', 'gini')
+        min_samples_split = dt_params.get('min_samples_split', 2)
+        use_bagging = dt_params.get('use_bagging', True)
+        n_estimators = dt_params.get('n_estimators', 10)
+        
+        # Bagi data menjadi train dan test (gunakan yang sudah ada)
+        X_train, X_test, y_train, y_test = train_test_split(
+            train_features, train_labels, test_size=0.2, random_state=42, stratify=train_labels
+        )
+        
+        # Train KNN dengan parameter yang diberikan
+        print(f"Training KNN with n_neighbors={n_neighbors}, weights={weights}")
+        knn = KNNDetailedModel(n_neighbors=n_neighbors, weights=weights)
+        knn.fit(X_train, y_train)
+        knn_metrics = knn.evaluate(X_test, y_test)
+        knn_acc = knn_metrics['accuracy']
+        
+        # Train Decision Tree dengan parameter yang diberikan
+        print(f"Training DT with max_depth={max_depth}, criterion={criterion}, min_samples_split={min_samples_split}")
+        if use_bagging:
+            dt = BaggedDTDetailedModel(
+                max_depth=max_depth,
+                criterion=criterion,
+                min_samples_split=min_samples_split,
+                random_state=42,
+                n_estimators=n_estimators
+            )
+        else:
+            dt = DTDetailedModel(
+                max_depth=max_depth,
+                criterion=criterion,
+                min_samples_split=min_samples_split,
+                random_state=42
+            )
+        
+        dt.fit(X_train, y_train)
+        dt_metrics = dt.evaluate(X_test, y_test)
+        dt_acc = dt_metrics['accuracy']
+        
+        # Simpan performa ke database dengan upload_id
+        save_model_performance('KNN (Manual Tuning)', knn_acc, {'n_neighbors': n_neighbors, 'weights': weights}, upload_id)
+        
+        dt_perf_params = {
+            'max_depth': max_depth, 
+            'criterion': criterion,
+            'min_samples_split': min_samples_split
+        }
+        if use_bagging:
+            dt_perf_params['use_bagging'] = True
+            dt_perf_params['n_estimators'] = n_estimators
+            
+        save_model_performance('Decision Tree (Manual Tuning)', dt_acc, dt_perf_params, upload_id)
+        
+        # Simpan model jika akurasi lebih baik dari yang ada
+        global trained_knn, trained_dt
+        
+        if trained_knn is None or knn_acc > 0.8:  # Hanya simpan jika akurasi >80% atau tidak ada model sebelumnya
+            trained_knn = knn.model
+            trained_dt = dt.model
+            
+            # Simpan model ke disk
+            models_data = {
+                'knn': knn.model,
+                'dt': dt.model,
+                'train_features': train_features,
+                'train_labels': train_labels,
+                'pca_model': pca_model,
+                'feature_selector': feature_selector,
+                'preprocessing_params': {
+                    'max_length': MAX_LENGTH,
+                    'embedding_method': 'combined_pooling'
+                }
+            }
+            save_complete_models(models_data)
+        
+        # Kirim hasil
+        return jsonify({
+            'success': True,
+            'knn_accuracy': knn_acc,
+            'dt_accuracy': dt_acc,
+            'knn_parameters': {'n_neighbors': n_neighbors, 'weights': weights},
+            'dt_parameters': dt_perf_params,
+            'models_saved': knn_acc > 0.8 or trained_knn is None,
+            'upload_id': upload_id
+        })
+        
+    except Exception as e:
+        print(f"Error tuning model: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-   print(f"Server starting on http://localhost:5000")
-   print(f"Upload folder: {UPLOAD_FOLDER}")
-   print(f"Model folder: {MODEL_FOLDER}")
-   print(f"Cache folder: {CACHE_FOLDER}")
-   # Jalankan server dalam mode non-threaded untuk menghindari masalah dengan matplotlib
-   app.run(debug=True, host='0.0.0.0', port=5000, threaded=False)   
+    print(f"Server starting on http://localhost:5000")
+    print(f"Upload folder: {UPLOAD_FOLDER}")
+    print(f"Model folder: {MODEL_FOLDER}")
+    print(f"Cache folder: {CACHE_FOLDER}")
+    # Jalankan server dalam mode non-threaded untuk menghindari masalah dengan matplotlib
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=False)
