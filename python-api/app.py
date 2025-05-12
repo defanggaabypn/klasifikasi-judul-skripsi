@@ -1161,6 +1161,30 @@ def process_file():
             
             print("Processing completed successfully!")
             
+            # Simpan visualisasi ke database
+            try:
+                conn = get_db_connection()
+                if conn:
+                    with conn.cursor() as cursor:
+                        # Simpan visualisasi ke database
+                        cursor.execute("""
+                            INSERT INTO model_visualizations 
+                            (upload_file_id, knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (
+                            upload_id,
+                            knn_cm_img,
+                            dt_cm_img,
+                            performance_comparison_img,
+                            accuracy_img
+                        ))
+                        
+                        conn.commit()
+                        print("Visualizations saved to database successfully")
+                    conn.close()
+            except Exception as e:
+                print(f"Error saving visualizations to database: {str(e)}")
+
             # Kirim hasil ke frontend dengan konversi nilai numpy
             return jsonify(convert_numpy_types({
                 'knn_accuracy': knn_acc,

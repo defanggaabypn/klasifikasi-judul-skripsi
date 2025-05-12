@@ -20,6 +20,12 @@ $results = [];
 $upload_id = isset($_GET['upload_id']) ? intval($_GET['upload_id']) : null;
 $fileInfo = null;
 
+// Ambil data confusion matrix jika tersedia
+$knnCmImg = null;
+$dtCmImg = null;
+$performanceComparisonImg = null;
+$accuracyImg = null;
+
 if ($dbStatus) {
     if ($upload_id) {
         // Ambil hasil berdasarkan upload_id
@@ -40,6 +46,14 @@ if ($dbStatus) {
             FROM uploaded_files
             WHERE id = ?
         ", [$upload_id]);
+        
+        // Ambil visualisasi berdasarkan upload_id
+        $vizData = $database->fetch("
+            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img 
+            FROM model_visualizations 
+            WHERE upload_file_id = ?
+            ORDER BY id DESC LIMIT 1
+        ", [$upload_id]);
     } else {
         // Ambil 100 hasil terbaru
         $results = $database->fetchAll("
@@ -52,6 +66,20 @@ if ($dbStatus) {
             ORDER BY p.prediction_date DESC
             LIMIT 100
         ");
+        
+        // Ambil visualisasi terbaru
+        $vizData = $database->fetch("
+            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img 
+            FROM model_visualizations 
+            ORDER BY id DESC LIMIT 1
+        ");
+    }
+    
+    if ($vizData) {
+        $knnCmImg = $vizData['knn_cm_img'];
+        $dtCmImg = $vizData['dt_cm_img'];
+        $performanceComparisonImg = $vizData['performance_comparison_img'];
+        $accuracyImg = $vizData['accuracy_img'];
     }
 
     // Hitung statistik
@@ -504,7 +532,11 @@ if ($dbStatus) {
                                             </div>
                                             <div class="card-body">
                                                 <div class="img-container">
+                                                <?php if ($accuracyImg): ?>
+                                                    <img src="data:image/png;base64,<?php echo $accuracyImg; ?>" class="img-fluid" alt="Perbandingan Akurasi">
+                                                <?php else: ?>
                                                     <canvas id="accuracyChart" height="250"></canvas>
+                                                <?php endif; ?>
                                                 </div>
                                             </div>
                                         </div>
@@ -666,8 +698,101 @@ if ($dbStatus) {
                         </div>
                     </div>
                     
-                    <!-- Hasil Detail -->
+                    <!-- Confusion Matrix Section -->
                     <div class="section-card fade-in" style="animation-delay: 0.8s">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-grid-3x3 fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Confusion Matrix</h5>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <?php if ($knnCmImg && $dtCmImg): ?>
+                                <div class="row">
+                                    <!-- KNN Confusion Matrix -->
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-header bg-white">
+                                                <div class="d-flex align-items-center">
+                                                    <i class="bi bi-bullseye fs-4 me-2 text-primary"></i>
+                                                    <h5 class="mb-0">KNN Confusion Matrix</h5>
+                                                </div>
+                                            </div>
+                                            <div class="card-body text-center">
+                                                <div id="knnConfusionMatrix" class="img-container">
+                                                    <img src="data:image/png;base64,<?php echo $knnCmImg; ?>" class="img-fluid" alt="KNN Confusion Matrix">
+                                                </div>
+                                                <p class="text-muted mt-2 small">Confusion matrix menunjukkan jumlah prediksi yang benar dan salah untuk setiap kategori</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Decision Tree Confusion Matrix -->
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-header bg-white">
+                                                <div class="d-flex align-items-center">
+                                                    <i class="bi bi-diagram-3 fs-4 me-2 text-success"></i>
+                                                    <h5 class="mb-0">Decision Tree Confusion Matrix</h5>
+                                                </div>
+                                            </div>
+                                            <div class="card-body text-center">
+                                                <div id="dtConfusionMatrix" class="img-container">
+                                                    <img src="data:image/png;base64,<?php echo $dtCmImg; ?>" class="img-fluid" alt="Decision Tree Confusion Matrix">
+                                                </div>
+                                                <p class="text-muted mt-2 small">Visualisasi performa model decision tree dalam memprediksi setiap kategori</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="alert alert-info mt-3">
+                                    <div class="d-flex">
+                                        <i class="bi bi-info-circle-fill fs-4 me-3"></i>
+                                        <div>
+                                            <strong>Cara Membaca Confusion Matrix</strong>
+                                            <p class="mb-0">Baris menunjukkan kategori sebenarnya, kolom menunjukkan kategori yang diprediksi. Angka diagonal (dari kiri atas ke kanan bawah) menunjukkan prediksi yang benar, sedangkan angka lainnya menunjukkan kesalahan klasifikasi.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php else: ?>
+                                <div class="alert alert-warning">
+                                    <div class="d-flex">
+                                        <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+                                        <div>
+                                            <strong>Visualisasi tidak tersedia</strong>
+                                            <p class="mb-0">Confusion matrix tidak tersedia untuk hasil klasifikasi ini. Coba proses ulang file atau unggah file baru.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php if ($performanceComparisonImg): ?>
+                    <!-- Performance Comparison Section -->
+                    <div class="section-card fade-in" style="animation-delay: 0.9s">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-bar-chart-line fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Perbandingan Performa Detail</h5>
+                                </div>
+                            </div>
+                            <div class="card-body text-center">
+                                <div class="img-container">
+                                    <img src="data:image/png;base64,<?php echo $performanceComparisonImg; ?>" class="img-fluid" alt="Performance Comparison">
+                                </div>
+                                <p class="text-muted mt-2">Perbandingan metrik performa (accuracy, precision, recall, F1-score) antara model KNN dan Decision Tree</p>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <!-- Hasil Detail -->
+                    <div class="section-card fade-in" style="animation-delay: 0.9s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
@@ -724,7 +849,7 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Navigation Buttons -->
-                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 0.9s">
+                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 1.0s">
                         <a href="index.php" class="btn btn-outline-secondary">
                             <i class="bi bi-arrow-left me-1"></i> Kembali ke Upload
                         </a>
@@ -963,7 +1088,8 @@ if ($dbStatus) {
                     document.getElementById('bestModel').textContent = 'Decision Tree (' + dtAccuracy.toFixed(2) + '%)';
                 }
                 
-                // Tampilkan grafik akurasi menggunakan Chart.js
+                // Tampilkan grafik akurasi menggunakan Chart.js jika tidak ada image dari database
+                <?php if (!$accuracyImg): ?>
                 const ctx = document.getElementById('accuracyChart').getContext('2d');
                 new Chart(ctx, {
                     type: 'bar',
@@ -1020,6 +1146,7 @@ if ($dbStatus) {
                         }
                     }
                 });
+                <?php endif; ?>
                 
                 // Hitung metrik precision, recall, dan F1 score untuk KNN
                 const knnMetricsTable = document.getElementById('knnMetricsTableBody');
@@ -1120,318 +1247,320 @@ if ($dbStatus) {
                 });
                 
                 // Hitung confusion matrix
-                databaseResults.forEach(row => {
-                    categories.forEach(category => {
-                        if (row.actual === category && row.dt_pred === category) {
-                            dtTruePositives[category]++;
-                        } else if (row.actual !== category && row.dt_pred === category) {
-                            dtFalsePositives[category]++;
-                        } else if (row.actual === category && row.dt_pred !== category) {
-                            dtFalseNegatives[category]++;
-                        } else if (row.actual !== category && row.dt_pred !== category) {
-                            dtTrueNegatives[category]++;
-                        }
-                    });
-                });
-                
-                // Hitung metrik
-                let totalDtPrecision = 0, totalDtRecall = 0, totalDtF1 = 0;
-                let weightedDtPrecision = 0, weightedDtRecall = 0, weightedDtF1 = 0;
-                
-                categories.forEach(category => {
-                    const tp = dtTruePositives[category];
-                    const fp = dtFalsePositives[category];
-                    const fn = dtFalseNegatives[category];
-                    const precision = tp / (tp + fp) || 0;
-                    const recall = tp / (tp + fn) || 0;
-                    const f1 = 2 * (precision * recall) / (precision + recall) || 0;
-                    
-                    const categoryCount = databaseResults.filter(r => r.actual === category).length;
-                    const weight = categoryCount / totalSamples;
-                    
-                    weightedDtPrecision += precision * weight;
-                    weightedDtRecall += recall * weight;
-                    weightedDtF1 += f1 * weight;
-                    
-                    totalDtPrecision += precision;
-                    totalDtRecall += recall;
-                    totalDtF1 += f1;
-                });
-                
-                // Rata-rata metrik (macro)
-                const macroDtPrecision = totalDtPrecision / categories.length;
-                const macroDtRecall = totalDtRecall / categories.length;
-                const macroDtF1 = totalDtF1 / categories.length;
-                
-                // Tampilkan metrik Decision Tree
-                dtMetricsTable.innerHTML += `
-                    <tr>
-                        <td>Accuracy</td>
-                        <td>${dtAccuracy.toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>Precision (weighted)</td>
-                        <td>${(weightedDtPrecision * 100).toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>Recall (weighted)</td>
-                        <td>${(weightedDtRecall * 100).toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>F1-Score (weighted)</td>
-                        <td>${(weightedDtF1 * 100).toFixed(2)}%</td>
-                    </tr>
-                `;
-                
-                // Default values for tree parameters
-                document.getElementById('dtDepth').textContent = "5";
-                document.getElementById('dtLeaves').textContent = "10";
-                
-                // Tampilkan tabel hasil
-                const tableBody = document.getElementById('resultsTableBody');
-                tableBody.innerHTML = '';
-                
-                databaseResults.forEach((row, index) => {
-                    const correctKNN = row.actual === row.knn_pred;
-                    const correctDT = row.actual === row.dt_pred;
-                    
-                    const tr = document.createElement('tr');
-                    tr.dataset.title = row.title;
-                    tr.dataset.actual = row.actual;
-                    tr.dataset.knn = row.knn_pred;
-                    tr.dataset.dt = row.dt_pred;
-                    
-                    // Determine overall correctness
-                    const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
-                    
-                    tr.dataset.correct = (correctCount === 2) ? 'all' : 
-                                        (correctCount > 0) ? 'partial' : 'none';
-                    
-                    if (correctCount === 2) {
-                        tr.classList.add('table-success');
-                    } else if (correctCount === 0) {
-                        tr.classList.add('table-danger');
-                    }
-                    
-                    const knnClass = correctKNN ? 'bg-success' : 'bg-danger';
-                    const dtClass = correctDT ? 'bg-success' : 'bg-danger';
-                    
-                    tr.innerHTML = `
-                        <td class="text-center">${index + 1}</td>
-                        <td>${row.title}</td>
-                        <td class="text-center"><span class="badge bg-secondary rounded-pill">${row.actual}</span></td>
-                        <td class="text-center"><span class="badge ${knnClass} rounded-pill">${row.knn_pred}</span></td>
-                        <td class="text-center"><span class="badge ${dtClass} rounded-pill">${row.dt_pred}</span></td>
-                        <td class="text-center">
-                            <button class="btn btn-sm btn-primary detail-btn" data-bs-toggle="modal" data-bs-target="#detailModal" 
-                                data-index="${index}">
-                                <i class="bi bi-info-circle"></i>
-                            </button>
-                        </td>
-                    `;
-                    
-                    tableBody.appendChild(tr);
-                });
-                
-                // Tambahkan hover effect
-                const tableRows = document.querySelectorAll('#resultsTableBody tr');
-                tableRows.forEach(row => {
-                    row.addEventListener('mouseenter', function() {
-                        this.classList.add('highlight-row');
-                    });
-                    row.addEventListener('mouseleave', function() {
-                        this.classList.remove('highlight-row');
-                    });
-                });
-                
-                // Event handler untuk filter dan pencarian
-                const filterButtons = document.querySelectorAll('.filter-btn');
-                const searchInput = document.getElementById('tableSearch');
-                
-                // Fungsi untuk filter dan pencarian
-                function filterTable() {
-                    const searchTerm = searchInput.value.toLowerCase();
-                    const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                    let visibleCount = 0;
-                    
-                    Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
-                        const title = row.dataset.title.toLowerCase();
-                        const correct = row.dataset.correct;
-                        
-                        // Filter berdasarkan teks
-                        const matchesSearch = title.includes(searchTerm);
-                        
-                        // Filter berdasarkan status (benar/salah)
-                        const matchesFilter = 
-                            activeFilter === 'all' || 
-                            (activeFilter === 'correct' && correct === 'all') ||
-                            (activeFilter === 'incorrect' && correct !== 'all');
-                        
-                        if (matchesSearch && matchesFilter) {
-                            row.style.display = '';
-                            visibleCount++;
-                        } else {
-                            row.style.display = 'none';
-                        }
-                    });
-                    
-                    // Tampilkan pesan jika tidak ada hasil
-                    document.getElementById('noResultsMessage').style.display = visibleCount > 0 ? 'none' : 'block';
-                }
-                
-                // Aktifkan filter buttons
-                filterButtons.forEach(button => {
-                    button.addEventListener('click', function() {
-                        // Reset semua button
-                        filterButtons.forEach(btn => btn.classList.remove('active'));
-                        
-                        // Aktifkan button yang diklik
-                        this.classList.add('active');
-                        
-                        // Filter tabel
-                        filterTable();
-                    });
-                });
-                
-                // Aktifkan pencarian
-                if (searchInput) {
-                    searchInput.addEventListener('input', filterTable);
-                }
-                
-                // Aktifkan handler untuk tombol detail
-                const detailButtons = document.querySelectorAll('.detail-btn');
-                detailButtons.forEach(button => {
-                    button.addEventListener('click', function() {
-                        const index = this.dataset.index;
-                        const row = databaseResults[index];
-                        
-                        document.getElementById('modalTitle').textContent = row.title;
-                        document.getElementById('modalCategory').textContent = row.actual;
-                        document.getElementById('modalActual').textContent = row.actual;
-                        document.getElementById('modalKNN').textContent = row.knn_pred;
-                        document.getElementById('modalDT').textContent = row.dt_pred;
-                        document.getElementById('modalMainCategory').textContent = row.actual;
-                    });
-                });
-            } else {
-                document.getElementById('results').style.display = 'none';
-                document.getElementById('noData').style.display = 'block';
-            }
-            
-            // Event handler untuk tombol prediksi
-            const showPredictionBtn = document.getElementById('showPredictionBtn');
-            if (showPredictionBtn) {
-                showPredictionBtn.addEventListener('click', function() {
-                    document.getElementById('predictionForm').style.display = 'block';
-                    document.getElementById('results').style.display = 'none';
-                    document.getElementById('predictionResult').style.display = 'none';
-                    document.getElementById('title').value = '';
-                    window.scrollTo(0, 0);
-                });
-            }
-            
-            // Event handler untuk pembatalan prediksi
-            const cancelPredict = document.getElementById('cancelPredict');
-            if (cancelPredict) {
-                cancelPredict.addEventListener('click', function() {
-                    document.getElementById('predictionForm').style.display = 'none';
-                    document.getElementById('results').style.display = 'block';
-                    window.scrollTo(0, 0);
-                });
-            }
-            
-            // Event handler untuk kembali ke hasil
-            const backToResultsBtn = document.getElementById('backToResultsBtn');
-            if (backToResultsBtn) {
-                backToResultsBtn.addEventListener('click', function() {
-                    document.getElementById('predictionForm').style.display = 'none';
-                    document.getElementById('results').style.display = 'block';
-                    window.scrollTo(0, 0);
-                });
-            }
-            
-            // Event handler untuk prediksi baru
-            const newPredictionBtn = document.getElementById('newPredictionBtn');
-            if (newPredictionBtn) {
-                newPredictionBtn.addEventListener('click', function() {
-                    document.getElementById('predictionResult').style.display = 'none';
-                    document.getElementById('title').value = '';
-                    document.getElementById('predictForm').style.display = 'block';
-                });
-            }
-            
-            // Event handler untuk form prediksi
-            const predictForm = document.getElementById('predictForm');
-            if (predictForm) {
-                predictForm.addEventListener('submit', function(e) {
-                    e.preventDefault();
-                    
-                    const title = document.getElementById('title').value.trim();
-                    if (!title) {
-                        alert('Silakan masukkan judul skripsi!');
-                        return;
-                    }
-                    
-                    // Tampilkan loading
-                    document.getElementById('loadingPredict').style.display = 'block';
-                    document.getElementById('predictionResult').style.display = 'none';
-                    document.getElementById('predictForm').style.display = 'none';
-                    
-                    // Tambahkan upload_id jika ada
-                    const upload_id = <?= $upload_id ? $upload_id : 'null' ?>;
-                    
-                    // Kirim request ke API
-                    fetch('<?php echo API_URL; ?>/predict', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ 
-                            title: title,
-                            upload_id: upload_id // Tambahkan upload_id
-                        })
-                    })
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Network response was not ok');
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        // Sembunyikan loading
-                        document.getElementById('loadingPredict').style.display = 'none';
-                        
-                        // Tampilkan hasil prediksi
-                        document.getElementById('predictedTitle').textContent = data.title;
-                        document.getElementById('predictedKNN').textContent = data.knn_prediction;
-                        document.getElementById('predictedDT').textContent = data.dt_prediction;
-                        
-                        // Tampilkan confidence info jika ada
-                        if (data.nearest_neighbors && data.nearest_neighbors.length > 0) {
-                            document.getElementById('knnConfidence').textContent = "Berdasarkan " + data.nearest_neighbors[0];
-                        }
-                        
-                        // Pesan tentang hasil
-                        const predictionMessage = document.getElementById('predictionMessage');
-                        const knnMatch = data.knn_prediction === data.dt_prediction;
-                        
-                        if (knnMatch) {
-                            predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama (" + data.knn_prediction + "), menunjukkan tingkat kepercayaan yang tinggi terhadap hasil klasifikasi judul ini.";
-                        } else {
-                            predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan hasil KNN (" + data.knn_prediction + ") atau Decision Tree (" + data.dt_prediction + ") berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
-                        }
-                        
-                        document.getElementById('predictionResult').style.display = 'block';
-                    })
-                    .catch(error => {
-                        // Sembunyikan loading
-                        document.getElementById('loadingPredict').style.display = 'none';
-                        document.getElementById('predictForm').style.display = 'block';
-                        
-                        console.error('Error:', error);
-                        alert('Terjadi kesalahan saat memproses prediksi. Silakan coba lagi.');
-                    });
-                });
-            }
-        });
-    </script>
+               databaseResults.forEach(row => {
+                   categories.forEach(category => {
+                       if (row.actual === category && row.dt_pred === category) {
+                           dtTruePositives[category]++;
+                       } else if (row.actual !== category && row.dt_pred === category) {
+                           dtFalsePositives[category]++;
+                       } else if (row.actual === category && row.dt_pred !== category) {
+                           dtFalseNegatives[category]++;
+                       } else if (row.actual !== category && row.dt_pred !== category) {
+                           dtTrueNegatives[category]++;
+                       }
+                   });
+               });
+               
+               // Hitung metrik
+               let totalDtPrecision = 0, totalDtRecall = 0, totalDtF1 = 0;
+               let weightedDtPrecision = 0, weightedDtRecall = 0, weightedDtF1 = 0;
+               
+               categories.forEach(category => {
+                   const tp = dtTruePositives[category];
+                   const fp = dtFalsePositives[category];
+                   const fn = dtFalseNegatives[category];
+                   const precision = tp / (tp + fp) || 0;
+                   const recall = tp / (tp + fn) || 0;
+                   const f1 = 2 * (precision * recall) / (precision + recall) || 0;
+                   
+                   const categoryCount = databaseResults.filter(r => r.actual === category).length;
+                   const weight = categoryCount / totalSamples;
+                   
+                   weightedDtPrecision += precision * weight;
+                   weightedDtRecall += recall * weight;
+                   weightedDtF1 += f1 * weight;
+                   
+                   totalDtPrecision += precision;
+                   totalDtRecall += recall;
+                   totalDtF1 += f1;
+               });
+               
+               // Rata-rata metrik (macro)
+               const macroDtPrecision = totalDtPrecision / categories.length;
+               const macroDtRecall = totalDtRecall / categories.length;
+               const macroDtF1 = totalDtF1 / categories.length;
+               
+               // Tampilkan metrik Decision Tree
+               dtMetricsTable.innerHTML += `
+                   <tr>
+                       <td>Accuracy</td>
+                       <td>${dtAccuracy.toFixed(2)}%</td>
+                   </tr>
+                   <tr>
+                       <td>Precision (weighted)</td>
+                       <td>${(weightedDtPrecision * 100).toFixed(2)}%</td>
+                   </tr>
+                   <tr>
+                       <td>Recall (weighted)</td>
+                       <td>${(weightedDtRecall * 100).toFixed(2)}%</td>
+                   </tr>
+                   <tr>
+                       <td>F1-Score (weighted)</td>
+                       <td>${(weightedDtF1 * 100).toFixed(2)}%</td>
+                   </tr>
+               `;
+               
+               // Default values for tree parameters
+               document.getElementById('dtDepth').textContent = "5";
+               document.getElementById('dtLeaves').textContent = "10";
+               
+               // Tampilkan tabel hasil
+               const tableBody = document.getElementById('resultsTableBody');
+               tableBody.innerHTML = '';
+               
+               databaseResults.forEach((row, index) => {
+                   const correctKNN = row.actual === row.knn_pred;
+                   const correctDT = row.actual === row.dt_pred;
+                   
+                   const tr = document.createElement('tr');
+                   tr.dataset.title = row.title;
+                   tr.dataset.actual = row.actual;
+                   tr.dataset.knn = row.knn_pred;
+                   tr.dataset.dt = row.dt_pred;
+                   
+                   // Determine overall correctness
+                   const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
+                   
+                   tr.dataset.correct = (correctCount === 2) ? 'all' : 
+                                       (correctCount > 0) ? 'partial' : 'none';
+                   
+                   if (correctCount === 2) {
+                       tr.classList.add('table-success');
+                   } else if (correctCount === 0) {
+                       tr.classList.add('table-danger');
+                   }
+                   
+                   const knnClass = correctKNN ? 'bg-success' : 'bg-danger';
+                   const dtClass = correctDT ? 'bg-success' : 'bg-danger';
+                   
+                   tr.innerHTML = `
+                       <td class="text-center">${index + 1}</td>
+                       <td>${row.title}</td>
+                       <td class="text-center"><span class="badge bg-secondary rounded-pill">${row.actual}</span></td>
+                       <td class="text-center"><span class="badge ${knnClass} rounded-pill">${row.knn_pred}</span></td>
+                       <td class="text-center"><span class="badge ${dtClass} rounded-pill">${row.dt_pred}</span></td>
+                       <td class="text-center">
+                           <button class="btn btn-sm btn-primary detail-btn" data-bs-toggle="modal" data-bs-target="#detailModal" 
+                               data-index="${index}">
+                               <i class="bi bi-info-circle"></i>
+                           </button>
+                       </td>
+                   `;
+                   
+                   tableBody.appendChild(tr);
+               });
+               
+               // Tambahkan hover effect
+               const tableRows = document.querySelectorAll('#resultsTableBody tr');
+               tableRows.forEach(row => {
+                   row.addEventListener('mouseenter', function() {
+                       this.classList.add('highlight-row');
+                   });
+                   row.addEventListener('mouseleave', function() {
+                       this.classList.remove('highlight-row');
+                   });
+               });
+               
+               // Event handler untuk filter dan pencarian
+               const filterButtons = document.querySelectorAll('.filter-btn');
+               const searchInput = document.getElementById('tableSearch');
+               
+               // Fungsi untuk filter dan pencarian
+               function filterTable() {
+                   const searchTerm = searchInput.value.toLowerCase();
+                   const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
+                   let visibleCount = 0;
+                   
+                   Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
+                       const title = row.dataset.title.toLowerCase();
+                       const correct = row.dataset.correct;
+                       
+                       // Filter berdasarkan teks
+                       const matchesSearch = title.includes(searchTerm);
+                       
+                       // Filter berdasarkan status (benar/salah)
+                       const matchesFilter = 
+                           activeFilter === 'all' || 
+                           (activeFilter === 'correct' && correct === 'all') ||
+                           (activeFilter === 'incorrect' && correct !== 'all');
+                       
+                       if (matchesSearch && matchesFilter) {
+                           row.style.display = '';
+                           visibleCount++;
+                       } else {
+                           row.style.display = 'none';
+                       }
+                   });
+                   
+                   // Tampilkan pesan jika tidak ada hasil
+                   document.getElementById('noResultsMessage').style.display = visibleCount > 0 ? 'none' : 'block';
+               }
+               
+               // Aktifkan filter buttons
+               filterButtons.forEach(button => {
+                   button.addEventListener('click', function() {
+                       // Reset semua button
+                       filterButtons.forEach(btn => btn.classList.remove('active'));
+                       
+                       // Aktifkan button yang diklik
+                       this.classList.add('active');
+                       
+                       // Filter tabel
+                       filterTable();
+                   });
+               });
+               
+               // Aktifkan pencarian
+               if (searchInput) {
+                   searchInput.addEventListener('input', filterTable);
+               }
+               
+               // Aktifkan handler untuk tombol detail
+               const detailButtons = document.querySelectorAll('.detail-btn');
+               detailButtons.forEach(button => {
+                   button.addEventListener('click', function() {
+                       const index = this.dataset.index;
+                       const row = databaseResults[index];
+                       
+                       document.getElementById('modalTitle').textContent = row.title;
+                       document.getElementById('modalCategory').textContent = row.actual;
+                       document.getElementById('modalActual').textContent = row.actual;
+                       document.getElementById('modalKNN').textContent = row.knn_pred;
+                       document.getElementById('modalDT').textContent = row.dt_pred;
+                       document.getElementById('modalMainCategory').textContent = row.actual;
+                   });
+               });
+           } else {
+               document.getElementById('results').style.display = 'none';
+               document.getElementById('noData').style.display = 'block';
+           }
+           
+           // Event handler untuk tombol prediksi
+           const showPredictionBtn = document.getElementById('showPredictionBtn');
+           if (showPredictionBtn) {
+               showPredictionBtn.addEventListener('click', function() {
+                   document.getElementById('predictionForm').style.display = 'block';
+                   document.getElementById('results').style.display = 'none';
+                   document.getElementById('predictionResult').style.display = 'none';
+                   document.getElementById('title').value = '';
+                   window.scrollTo(0, 0);
+               });
+           }
+           
+           // Event handler untuk pembatalan prediksi
+           const cancelPredict = document.getElementById('cancelPredict');
+           if (cancelPredict) {
+               cancelPredict.addEventListener('click', function() {
+                   document.getElementById('predictionForm').style.display = 'none';
+                   document.getElementById('results').style.display = 'block';
+                   window.scrollTo(0, 0);
+               });
+           }
+           
+           // Event handler untuk kembali ke hasil
+           const backToResultsBtn = document.getElementById('backToResultsBtn');
+           if (backToResultsBtn) {
+               backToResultsBtn.addEventListener('click', function() {
+                   document.getElementById('predictionForm').style.display = 'none';
+                   document.getElementById('results').style.display = 'block';
+                   window.scrollTo(0, 0);
+               });
+           }
+           
+           // Event handler untuk prediksi baru
+           const newPredictionBtn = document.getElementById('newPredictionBtn');
+           if (newPredictionBtn) {
+               newPredictionBtn.addEventListener('click', function() {
+                   document.getElementById('predictionResult').style.display = 'none';
+                   document.getElementById('title').value = '';
+                   document.getElementById('predictForm').style.display = 'block';
+               });
+           }
+           
+           // Event handler untuk form prediksi
+           const predictForm = document.getElementById('predictForm');
+           if (predictForm) {
+               predictForm.addEventListener('submit', function(e) {
+                   e.preventDefault();
+                   
+                   const title = document.getElementById('title').value.trim();
+                   if (!title) {
+                       alert('Silakan masukkan judul skripsi!');
+                       return;
+                   }
+                   
+                   // Tampilkan loading
+                   document.getElementById('loadingPredict').style.display = 'block';
+                   document.getElementById('predictionResult').style.display = 'none';
+                   document.getElementById('predictForm').style.display = 'none';
+                   
+                   // Tambahkan upload_id jika ada
+                   const upload_id = <?= $upload_id ? $upload_id : 'null' ?>;
+                   
+                   // Kirim request ke API
+                   fetch('<?php echo API_URL; ?>/predict', {
+                       method: 'POST',
+                       headers: {
+                           'Content-Type': 'application/json',
+                       },
+                       body: JSON.stringify({ 
+                           title: title,
+                           upload_id: upload_id // Tambahkan upload_id
+                       })
+                   })
+                   .then(response => {
+                       if (!response.ok) {
+                           throw new Error('Network response was not ok');
+                       }
+                       return response.json();
+                   })
+                   .then(data => {
+                       // Sembunyikan loading
+                       document.getElementById('loadingPredict').style.display = 'none';
+                       
+                       // Tampilkan hasil prediksi
+                       document.getElementById('predictedTitle').textContent = data.title;
+                       document.getElementById('predictedKNN').textContent = data.knn_prediction;
+                       document.getElementById('predictedDT').textContent = data.dt_prediction;
+                       
+                       // Tampilkan confidence info jika ada
+                       if (data.nearest_neighbors && data.nearest_neighbors.length > 0) {
+                           document.getElementById('knnConfidence').textContent = "Berdasarkan " + data.nearest_neighbors[0];
+                       }
+                       
+                       // Pesan tentang hasil
+                       const predictionMessage = document.getElementById('predictionMessage');
+                       const knnMatch = data.knn_prediction === data.dt_prediction;
+                       
+                       if (knnMatch) {
+                           predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama (" + data.knn_prediction + "), menunjukkan tingkat kepercayaan yang tinggi terhadap hasil klasifikasi judul ini.";
+                       } else {
+                           predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan hasil KNN (" + data.knn_prediction + ") atau Decision Tree (" + data.dt_prediction + ") berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
+                       }
+                       
+                       document.getElementById('predictionResult').style.display = 'block';
+                   })
+                   .catch(error => {
+                       // Sembunyikan loading
+                       document.getElementById('loadingPredict').style.display = 'none';
+                       document.getElementById('predictForm').style.display = 'block';
+                       
+                       console.error('Error:', error);
+                       alert('Terjadi kesalahan saat memproses prediksi. Silakan coba lagi.');
+                   });
+               });
+           }
+       });
+   </script>
+</body>
+</html>
