@@ -2,7 +2,7 @@
 
 **STUDI KASUS: JURUSAN PENDIDIKAN TEKNOLOGI INFORMASI DAN KOMUNIKASI**
 
-![Screenshot Dashboard](screenshots/dashboard.png)
+![Screenshot Dashboard](screenshots/dashboard.PNG)
 
 ## Deskripsi Sistem
 
@@ -46,8 +46,8 @@ Sistem ini mengimplementasikan analisis perbandingan algoritma machine learning 
 - Optimasi model dengan hyperparameter tuning
 - Penanganan ketidakseimbangan kelas dengan oversampling
 
-![Screenshot Visualisasi](screenshots/visualisasi.png)
-![Screenshot Visualisasi](screenshots/visualisasi1.png)
+![Screenshot Visualisasi](screenshots/visualisasi.PNG)
+![Screenshot Visualisasi](screenshots/visualisasi1.PNG)
 
 ## Struktur Proyek
 ```text
@@ -233,8 +233,8 @@ Sistem mengimplementasikan caching untuk meningkatkan efisiensi:
    - Mengembalikan visualisasi dan metrik performa
 3. Hasil ditampilkan pada antarmuka web
 4. Prediksi disimpan dalam database untuk referensi di masa mendatang
-![Screenshot](screenshots/predict.png)
-![Screenshot](screenshots/predict1.png)
+![Screenshot](screenshots/predict.PNG)
+![Screenshot](screenshots/predict1.PNG)
 
 
 ## Endpoint API
@@ -375,10 +375,10 @@ Proyek ini menggunakan komponen utama berikut:
 
 
 ## Dokumentasi Lainnya
-![Screenshot](screenshots/dashboard1.png)
-![Screenshot](screenshots/dashboard2.png)
-![Screenshot](screenshots/dashboard3.png)
-![Screenshot](screenshots/dashboard4.png)
-![Screenshot](screenshots/dashboard5.png)
-![Screenshot](screenshots/dashboard6.png)
-![Screenshot](screenshots/dashboard7.png)
+![Screenshot](screenshots/dashboard1.PNG)
+![Screenshot](screenshots/dashboard2.PNG)
+![Screenshot](screenshots/dashboard3.PNG)
+![Screenshot](screenshots/dashboard4.PNG)
+![Screenshot](screenshots/dashboard5.PNG)
+![Screenshot](screenshots/dashboard6.PNG)
+![Screenshot](screenshots/dashboard7.PNG)
