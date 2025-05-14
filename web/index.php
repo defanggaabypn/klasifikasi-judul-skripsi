@@ -286,12 +286,6 @@ try {
                     <div class="step">3</div>
                 </div>
                 
-                <!-- Breadcrumb -->
-                <nav aria-label="breadcrumb" class="mb-3 fade-in" style="animation-delay: 0.1s">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item active" aria-current="page">Beranda</li>
-                    </ol>
-                </nav>
                 
                 <!-- Navigasi Menu -->
                 <nav class="navbar navbar-expand-lg navbar-light fade-in" style="animation-delay: 0.2s">
