@@ -375,10 +375,10 @@ Proyek ini menggunakan komponen utama berikut:
 
 
 ## Dokumentasi Lainnya
-![Screenshot](screenshots/dashboard1.PNG)
-![Screenshot](screenshots/dashboard2.PNG)
-![Screenshot](screenshots/dashboard3.PNG)
-![Screenshot](screenshots/dashboard4.PNG)
-![Screenshot](screenshots/dashboard5.PNG)
-![Screenshot](screenshots/dashboard6.PNG)
-![Screenshot](screenshots/dashboard7.PNG)
+![Screenshot](screenshots/dashboard1.png)
+![Screenshot](screenshots/dashboard2.png)
+![Screenshot](screenshots/dashboard3.png)
+![Screenshot](screenshots/dashboard4.png)
+![Screenshot](screenshots/dashboard5.png)
+![Screenshot](screenshots/dashboard6.png)
+![Screenshot](screenshots/dashboard7.png)
