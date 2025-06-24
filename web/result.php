@@ -716,32 +716,33 @@ error_log("All categories found: " . print_r($allCategories, true));
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-3 mb-3">
-                                        <div class="metric-card bg-primary text-white">
-                                            <div class="metric-value"><?= $trainingTotalCount + $testingTotalCount ?></div>
-                                            <div class="metric-label">Total Data</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3 mb-3">
-                                        <div class="metric-card bg-info text-white">
-                                            <div class="metric-value"><?= $trainingTotalCount ?></div>
-                                            <div class="metric-label">Data Training</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3 mb-3">
-                                        <div class="metric-card bg-success text-white">
-                                            <div class="metric-value"><?= $testingTotalCount ?></div>
-                                            <div class="metric-label">Data Testing</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3 mb-3">
-                                        <div class="metric-card bg-warning text-white">
-                                            <div class="metric-value"><?= count($allCategories) ?></div>
-                                            <div class="metric-label">Kategori</div>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="row">
+    <div class="col-md-3 mb-3">
+        <div class="metric-card bg-primary text-white">
+            <div class="metric-value"><?= $trainingTotalCount + $testingTotalCount ?></div>
+            <div class="metric-label" style="color: white !important;">Total Data</div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="metric-card bg-info text-white">
+            <div class="metric-value"><?= $trainingTotalCount ?></div>
+            <div class="metric-label" style="color: white !important;">Data Training</div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="metric-card bg-success text-white">
+            <div class="metric-value"><?= $testingTotalCount ?></div>
+            <div class="metric-label" style="color: white !important;">Data Testing</div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="metric-card bg-warning text-white">
+            <div class="metric-value"><?= count($allCategories) ?></div>
+            <div class="metric-label" style="color: #212529 !important;">Kategori</div>
+        </div>
+    </div>
+</div>
+
                                 
                                 <!-- Distribusi Data per Kategori -->
                                 <div class="mt-4">
