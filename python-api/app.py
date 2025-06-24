@@ -268,6 +268,234 @@ def save_prediction_to_db(title, actual_category, knn_pred, dt_pred, confidence=
         print(f"Error saving prediction to database: {str(e)}")
         return None
 
+# Simpan data training dan testing ke database
+def save_training_testing_data(titles, labels, predictions_knn, predictions_dt, data_types, upload_file_id=None):
+    """Simpan data training dan testing ke database"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                for i, (title, label, knn_pred, dt_pred, data_type) in enumerate(zip(titles, labels, predictions_knn, predictions_dt, data_types)):
+                    # Dapatkan ID kategori
+                    cursor.execute("SELECT id FROM categories WHERE name = %s", (label,))
+                    actual_result = cursor.fetchone()
+                    actual_id = actual_result['id'] if actual_result else None
+                    
+                    cursor.execute("SELECT id FROM categories WHERE name = %s", (knn_pred,))
+                    knn_result = cursor.fetchone()
+                    knn_id = knn_result['id'] if knn_result else None
+                    
+                    cursor.execute("SELECT id FROM categories WHERE name = %s", (dt_pred,))
+                    dt_result = cursor.fetchone()
+                    dt_id = dt_result['id'] if dt_result else None
+                    
+                    # Hitung apakah prediksi benar
+                    is_correct_knn = 1 if label == knn_pred else 0
+                    is_correct_dt = 1 if label == dt_pred else 0
+                    
+                    # Simpan ke training_data
+                    cursor.execute("""
+                        INSERT INTO training_data 
+                        (upload_file_id, title, actual_category_id, data_type, knn_prediction_id, dt_prediction_id, is_correct_knn, is_correct_dt)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (upload_file_id, title, actual_id, data_type, knn_id, dt_id, is_correct_knn, is_correct_dt))
+                
+                conn.commit()
+                print(f"Saved {len(titles)} training/testing records to database")
+                return True
+            conn.close()
+    except Exception as e:
+        print(f"Error saving training/testing data: {str(e)}")
+        return False
+
+def save_data_split_info(total_data, training_size, testing_size, upload_file_id=None):
+    """Simpan informasi pembagian data"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                training_percentage = (training_size / total_data) * 100
+                testing_percentage = (testing_size / total_data) * 100
+                
+                cursor.execute("""
+                    INSERT INTO data_split_info 
+                    (upload_file_id, total_data, training_size, testing_size, training_percentage, testing_percentage, split_method, random_state)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (upload_file_id, total_data, training_size, testing_size, training_percentage, testing_percentage, 'train_test_split', 42))
+                
+                conn.commit()
+                print(f"Saved data split info: {total_data} total, {training_size} train, {testing_size} test")
+                return True
+            conn.close()
+    except Exception as e:
+        print(f"Error saving data split info: {str(e)}")
+        return False
+
+def save_model_metrics(model_name, data_type, accuracy, precision_macro, recall_macro, f1_macro, 
+                      precision_weighted, recall_weighted, f1_weighted, upload_file_id=None):
+    """Simpan metrik model detail"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO model_metrics 
+                    (upload_file_id, model_name, data_type, accuracy, precision_macro, recall_macro, f1_macro,
+                     precision_weighted, recall_weighted, f1_weighted)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (upload_file_id, model_name, data_type, accuracy, precision_macro, recall_macro, f1_macro,
+                      precision_weighted, recall_weighted, f1_weighted))
+                
+                conn.commit()
+                return True
+            conn.close()
+    except Exception as e:
+        print(f"Error saving model metrics: {str(e)}")
+        return False
+
+# Simpan data confusion matrix ke database
+def save_confusion_matrix_data(y_true, y_pred, model_name, data_type, upload_file_id=None):
+    """Simpan data confusion matrix ke database"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                # Hitung confusion matrix
+                from sklearn.metrics import confusion_matrix
+                import numpy as np
+                
+                # Dapatkan label unik
+                labels = sorted(list(set(y_true + y_pred)))
+                cm = confusion_matrix(y_true, y_pred, labels=labels)
+                
+                # Simpan setiap cell dari confusion matrix
+                for i, actual_label in enumerate(labels):
+                    for j, predicted_label in enumerate(labels):
+                        count = int(cm[i][j])
+                        if count > 0:  # Hanya simpan yang ada nilainya
+                            # Dapatkan ID kategori
+                            cursor.execute("SELECT id FROM categories WHERE name = %s", (actual_label,))
+                            actual_result = cursor.fetchone()
+                            actual_id = actual_result['id'] if actual_result else None
+                            
+                            cursor.execute("SELECT id FROM categories WHERE name = %s", (predicted_label,))
+                            predicted_result = cursor.fetchone()
+                            predicted_id = predicted_result['id'] if predicted_result else None
+                            
+                            if actual_id and predicted_id:
+                                # Cek apakah data sudah ada
+                                cursor.execute("""
+                                    SELECT id FROM confusion_matrix_data 
+                                    WHERE upload_file_id = %s AND model_name = %s 
+                                    AND actual_category_id = %s AND predicted_category_id = %s
+                                """, (upload_file_id, f"{model_name}_{data_type}", actual_id, predicted_id))
+                                
+                                existing = cursor.fetchone()
+                                if existing:
+                                    # Update count
+                                    cursor.execute("""
+                                        UPDATE confusion_matrix_data 
+                                        SET count = %s 
+                                        WHERE id = %s
+                                    """, (count, existing['id']))
+                                else:
+                                    # Insert baru
+                                    cursor.execute("""
+                                        INSERT INTO confusion_matrix_data 
+                                        (upload_file_id, model_name, actual_category_id, predicted_category_id, count)
+                                        VALUES (%s, %s, %s, %s, %s)
+                                    """, (upload_file_id, f"{model_name}_{data_type}", actual_id, predicted_id, count))
+                
+                conn.commit()
+                return True
+            conn.close()
+    except Exception as e:
+        print(f"Error saving confusion matrix data: {str(e)}")
+        return False
+
+def generate_combined_confusion_matrix(knn_train_cm, knn_test_cm, dt_train_cm, dt_test_cm, labels):
+    """Generate confusion matrix untuk training dan testing secara bersamaan"""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle('Confusion Matrix Comparison: Training vs Testing', fontsize=16, fontweight='bold')
+    
+    # KNN Training
+    im1 = axes[0, 0].imshow(knn_train_cm, interpolation='nearest', cmap='Blues')
+    axes[0, 0].set_title('KNN - Training Data', fontweight='bold')
+    axes[0, 0].set_xlabel('Predicted Label')
+    axes[0, 0].set_ylabel('True Label')
+    axes[0, 0].set_xticks(range(len(labels)))
+    axes[0, 0].set_yticks(range(len(labels)))
+    axes[0, 0].set_xticklabels(labels, rotation=45)
+    axes[0, 0].set_yticklabels(labels)
+    
+    # Tambahkan text annotations untuk KNN Training
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            axes[0, 0].text(j, i, str(knn_train_cm[i, j]), ha='center', va='center', 
+                          color='white' if knn_train_cm[i, j] > knn_train_cm.max()/2 else 'black')
+    
+    # KNN Testing
+    im2 = axes[0, 1].imshow(knn_test_cm, interpolation='nearest', cmap='Blues')
+    axes[0, 1].set_title('KNN - Testing Data', fontweight='bold')
+    axes[0, 1].set_xlabel('Predicted Label')
+    axes[0, 1].set_ylabel('True Label')
+    axes[0, 1].set_xticks(range(len(labels)))
+    axes[0, 1].set_yticks(range(len(labels)))
+    axes[0, 1].set_xticklabels(labels, rotation=45)
+    axes[0, 1].set_yticklabels(labels)
+    
+    # Tambahkan text annotations untuk KNN Testing
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            axes[0, 1].text(j, i, str(knn_test_cm[i, j]), ha='center', va='center',
+                          color='white' if knn_test_cm[i, j] > knn_test_cm.max()/2 else 'black')
+    
+    # DT Training
+    im3 = axes[1, 0].imshow(dt_train_cm, interpolation='nearest', cmap='Greens')
+    axes[1, 0].set_title('Decision Tree - Training Data', fontweight='bold')
+    axes[1, 0].set_xlabel('Predicted Label')
+    axes[1, 0].set_ylabel('True Label')
+    axes[1, 0].set_xticks(range(len(labels)))
+    axes[1, 0].set_yticks(range(len(labels)))
+    axes[1, 0].set_xticklabels(labels, rotation=45)
+    axes[1, 0].set_yticklabels(labels)
+    
+    # Tambahkan text annotations untuk DT Training
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            axes[1, 0].text(j, i, str(dt_train_cm[i, j]), ha='center', va='center',
+                          color='white' if dt_train_cm[i, j] > dt_train_cm.max()/2 else 'black')
+    
+    # DT Testing
+    im4 = axes[1, 1].imshow(dt_test_cm, interpolation='nearest', cmap='Greens')
+    axes[1, 1].set_title('Decision Tree - Testing Data', fontweight='bold')
+    axes[1, 1].set_xlabel('Predicted Label')
+    axes[1, 1].set_ylabel('True Label')
+    axes[1, 1].set_xticks(range(len(labels)))
+    axes[1, 1].set_yticks(range(len(labels)))
+    axes[1, 1].set_xticklabels(labels, rotation=45)
+    axes[1, 1].set_yticklabels(labels)
+    
+    # Tambahkan text annotations untuk DT Testing
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            axes[1, 1].text(j, i, str(dt_test_cm[i, j]), ha='center', va='center',
+                          color='white' if dt_test_cm[i, j] > dt_test_cm.max()/2 else 'black')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Simpan ke buffer
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+    buf.seek(0)
+    
+    # Convert ke base64
+    img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+    plt.close()
+    
+    return img_str
+
 # Simpan performa model ke database
 def save_model_performance(model_name, accuracy, parameters=None, upload_file_id=None):
     try:
@@ -392,7 +620,7 @@ def apply_pca(features, n_components=100, fit=False):
         with open(PCA_FILENAME, 'wb') as f:
             pickle.dump(pca_model, f)
     else:
-        reduced_features = pca_model.transform(features_array)
+              reduced_features = pca_model.transform(features_array)
     
     return reduced_features
 
@@ -800,6 +1028,46 @@ def generate_performance_comparison(knn_metrics, dt_metrics, category_labels):
     
     return img_str
 
+# Fungsi untuk membuat grafik perbandingan akurasi training vs testing
+def generate_train_test_comparison(knn_train_acc, dt_train_acc, knn_test_acc, dt_test_acc):
+    plt.figure(figsize=(10, 6))
+    algorithms = ['KNN', 'Decision Tree']
+    training_accuracies = [knn_train_acc, dt_train_acc]
+    testing_accuracies = [knn_test_acc, dt_test_acc]
+
+    x = np.arange(len(algorithms))
+    width = 0.35
+
+    plt.bar(x - width/2, training_accuracies, width, label='Training Accuracy', color=['lightblue', 'lightgreen'], alpha=0.7)
+    plt.bar(x + width/2, testing_accuracies, width, label='Testing Accuracy', color=['blue', 'green'], alpha=0.7)
+
+    plt.xlabel('Algoritma')
+    plt.ylabel('Akurasi')
+    plt.title('Perbandingan Akurasi Training vs Testing')
+    plt.xticks(x, algorithms)
+    plt.ylim(0, 1.1)
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Tambahkan label nilai
+    for i, v in enumerate(training_accuracies):
+        plt.text(i - width/2, v + 0.02, f'{v:.3f}', ha='center', fontsize=9)
+
+    for i, v in enumerate(testing_accuracies):
+        plt.text(i + width/2, v + 0.02, f'{v:.3f}', ha='center', fontsize=9)
+
+    # Simpan plot ke buffer
+    buf = BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+
+    # Convert plot ke base64
+    img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+    plt.close()
+    
+    return img_str
+
 # Endpoint untuk proses file Excel dan klasifikasi
 @app.route('/process', methods=['POST'])
 def process_file():
@@ -1006,6 +1274,88 @@ def process_file():
             dt_pred = dt.predict(X_test)
             dt_acc = dt_metrics['accuracy']
             
+            # Prediksi pada data training untuk perbandingan
+            print("Evaluating on training data...")
+            knn_train_pred = knn.predict(X_train)
+            dt_train_pred = dt.predict(X_train)
+            knn_train_acc = accuracy_score(y_train, knn_train_pred)
+            dt_train_acc = accuracy_score(y_train, dt_train_pred)
+            
+            print(f"Training Accuracy - KNN: {knn_train_acc:.4f}, DT: {dt_train_acc:.4f}")
+            print(f"Testing Accuracy - KNN: {knn_acc:.4f}, DT: {dt_acc:.4f}")
+            
+            # Simpan informasi split data
+            save_data_split_info(len(balanced_embeddings), len(y_train), len(y_test), upload_id)
+
+            # Siapkan data untuk disimpan - PERBAIKAN MAPPING INDEKS
+            # Karena train_test_split mengacak data, kita perlu menggunakan indeks yang benar
+            from sklearn.model_selection import train_test_split as tts_indices
+            
+            # Buat indeks untuk mapping yang benar
+            indices = list(range(len(balanced_embeddings)))
+            train_indices, test_indices = tts_indices(
+                indices, test_size=0.2, random_state=42, 
+                stratify=balanced_labels
+            )
+            
+            # Ambil judul berdasarkan indeks yang benar
+            train_titles_for_db = [balanced_titles[i] for i in train_indices]
+            test_titles_for_db = [balanced_titles[i] for i in test_indices]
+
+            # Simpan data training dan testing
+            all_titles = train_titles_for_db + test_titles_for_db
+            all_labels = y_train + y_test
+            all_knn_preds = knn_train_pred.tolist() + knn_pred.tolist()
+            all_dt_preds = dt_train_pred.tolist() + dt_pred.tolist()
+            all_data_types = ['training'] * len(y_train) + ['testing'] * len(y_test)
+
+            save_training_testing_data(all_titles, all_labels, all_knn_preds, all_dt_preds, all_data_types, upload_id)
+
+            # Simpan metrik detail
+            # Training metrics
+            save_model_metrics('KNN', 'training', knn_train_acc, 
+                              knn.classification_report['macro avg']['precision'],
+                              knn.classification_report['macro avg']['recall'],
+                              knn.classification_report['macro avg']['f1-score'],
+                              knn.classification_report['weighted avg']['precision'],
+                              knn.classification_report['weighted avg']['recall'],
+                              knn.classification_report['weighted avg']['f1-score'],
+                              upload_id)
+
+            save_model_metrics('Decision Tree', 'training', dt_train_acc,
+                              dt.classification_report['macro avg']['precision'],
+                              dt.classification_report['macro avg']['recall'],
+                              dt.classification_report['macro avg']['f1-score'],
+                              dt.classification_report['weighted avg']['precision'],
+                              dt.classification_report['weighted avg']['recall'],
+                              dt.classification_report['weighted avg']['f1-score'],
+                              upload_id)
+
+            # Testing metrics  
+            save_model_metrics('KNN', 'testing', knn_acc,
+                              knn.classification_report['macro avg']['precision'],
+                              knn.classification_report['macro avg']['recall'],
+                              knn.classification_report['macro avg']['f1-score'],
+                              knn.classification_report['weighted avg']['precision'],
+                              knn.classification_report['weighted avg']['recall'],
+                              knn.classification_report['weighted avg']['f1-score'],
+                              upload_id)
+
+            save_model_metrics('Decision Tree', 'testing', dt_acc,
+                              dt.classification_report['macro avg']['precision'],
+                              dt.classification_report['macro avg']['recall'],
+                              dt.classification_report['macro avg']['f1-score'],
+                              dt.classification_report['weighted avg']['precision'],
+                              dt.classification_report['weighted avg']['recall'],
+                              dt.classification_report['weighted avg']['f1-score'],
+                              upload_id)
+
+            # Simpan confusion matrix data ke database
+            save_confusion_matrix_data(y_train, knn_train_pred.tolist(), 'KNN', 'training', upload_id)
+            save_confusion_matrix_data(y_test, knn_pred.tolist(), 'KNN', 'testing', upload_id)
+            save_confusion_matrix_data(y_train, dt_train_pred.tolist(), 'Decision Tree', 'training', upload_id)
+            save_confusion_matrix_data(y_test, dt_pred.tolist(), 'Decision Tree', 'testing', upload_id)
+            
             # Simpan model yang dilatih
             global trained_knn, trained_dt, train_features, train_labels
             trained_knn = knn.model
@@ -1039,9 +1389,16 @@ def process_file():
             knn_cm = knn.confusion_matrix
             dt_cm = dt.confusion_matrix
             
+            # Confusion matrix untuk training data
+            knn_train_cm = confusion_matrix(y_train, knn_train_pred, labels=unique_labels)
+            dt_train_cm = confusion_matrix(y_train, dt_train_pred, labels=unique_labels)
+            
             # Generate gambar confusion matrix
             knn_cm_img = generate_confusion_matrix_image(knn_cm, unique_labels, "Confusion Matrix - KNN", 'Blues')
             dt_cm_img = generate_confusion_matrix_image(dt_cm, unique_labels, "Confusion Matrix - Decision Tree", 'Greens')
+            
+            # Generate combined confusion matrix
+            combined_cm_img = generate_combined_confusion_matrix(knn_train_cm, knn_cm, dt_train_cm, dt_cm, unique_labels)
             
             # Generate perbandingan metrik performa
             performance_metrics = {
@@ -1064,8 +1421,12 @@ def process_file():
             accuracies = [knn_acc, dt_acc]
             plt.bar(algorithms, accuracies, color=['blue', 'green'])
             plt.ylim(0, 1)
-            plt.title('Perbandingan Akurasi Model')
+            plt.title('Perbandingan Akurasi Model (Testing Data)')
             plt.ylabel('Akurasi')
+            
+            # Tambahkan label nilai
+            for i, v in enumerate(accuracies):
+                plt.text(i, v + 0.02, f'{v:.3f}', ha='center', fontsize=10)
             
             # Simpan plot ke buffer
             buf = BytesIO()
@@ -1077,24 +1438,46 @@ def process_file():
             accuracy_img = base64.b64encode(buf.getvalue()).decode('utf-8')
             plt.close()
             
-            # Persiapkan hasil prediksi untuk ditampilkan
-            test_titles = [balanced_titles[i] for i in range(len(balanced_titles) - len(y_test), len(balanced_titles))]
-            results_table = []
+            # Generate grafik perbandingan training vs testing
+            train_test_comparison_img = generate_train_test_comparison(
+                knn_train_acc, dt_train_acc, knn_acc, dt_acc
+            )
             
+            # Persiapkan hasil prediksi untuk ditampilkan - DATA TESTING
+            # Gunakan indeks yang sudah diperbaiki
+            test_titles = test_titles_for_db
+            train_titles = train_titles_for_db
+            
+            # Data Testing Results
+            results_table = []
             for i in range(len(y_test)):
                 results_table.append({
                     'title': test_titles[i][:100] + '...' if len(test_titles[i]) > 100 else test_titles[i],
                     'full_title': test_titles[i],
                     'actual': y_test[i],
                     'knn_pred': knn_pred[i],
-                    'dt_pred': dt_pred[i]
+                    'dt_pred': dt_pred[i],
+                    'data_type': 'testing'
+                })
+            
+            # Data Training Results
+            training_results_table = []
+            for i in range(len(y_train)):
+                training_results_table.append({
+                    'title': train_titles[i][:100] + '...' if len(train_titles[i]) > 100 else train_titles[i],
+                    'full_title': train_titles[i],
+                    'actual': y_train[i],
+                    'knn_pred': knn_train_pred[i],
+                    'dt_pred': dt_train_pred[i],
+                    'data_type': 'training'
                 })
             
             # Detailed metrics for each model
             knn_detailed = {
                 'overall': knn_metrics,
                 'per_class': knn.class_metrics,
-                'classification_report': knn.classification_report
+                'classification_report': knn.classification_report,
+                'training_accuracy': knn_train_acc
             }
             
             dt_detailed = {
@@ -1102,7 +1485,8 @@ def process_file():
                 'per_class': dt.class_metrics,
                 'classification_report': dt.classification_report,
                 'tree_depth': dt.metrics.get('tree_depth', 0) if hasattr(dt, 'metrics') else 0,
-                'n_leaves': dt.metrics.get('n_leaves', 0) if hasattr(dt, 'metrics') else 0
+                'n_leaves': dt.metrics.get('n_leaves', 0) if hasattr(dt, 'metrics') else 0,
+                'training_accuracy': dt_train_acc
             }
             
             # Setelah proses klasifikasi selesai, simpan data ke database
@@ -1179,6 +1563,7 @@ def process_file():
                         print(f"Upload ID for visualizations: {upload_id}")
                         print(f"KNN CM Image size: {len(knn_cm_img) if knn_cm_img else 'None'}")
                         print(f"DT CM Image size: {len(dt_cm_img) if dt_cm_img else 'None'}")
+                        print(f"Combined CM Image size: {len(combined_cm_img) if combined_cm_img else 'None'}")
                         
                         if table_exists:
                             # Cek apakah sudah ada entri untuk upload_id ini
@@ -1190,27 +1575,33 @@ def process_file():
                                     # Update visualisasi yang sudah ada
                                     cursor.execute("""
                                         UPDATE model_visualizations 
-                                        SET knn_cm_img = %s, dt_cm_img = %s, performance_comparison_img = %s, accuracy_img = %s 
+                                        SET knn_cm_img = %s, dt_cm_img = %s, performance_comparison_img = %s, 
+                                            accuracy_img = %s, train_test_comparison_img = %s, combined_cm_img = %s
                                         WHERE upload_file_id = %s
                                     """, (
                                         knn_cm_img,
                                         dt_cm_img,
                                         performance_comparison_img,
                                         accuracy_img,
+                                        train_test_comparison_img,
+                                        combined_cm_img,
                                         upload_id
                                     ))
                                 else:
                                     # Simpan visualisasi baru
                                     cursor.execute("""
                                         INSERT INTO model_visualizations 
-                                        (upload_file_id, knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img)
-                                        VALUES (%s, %s, %s, %s, %s)
+                                        (upload_file_id, knn_cm_img, dt_cm_img, performance_comparison_img, 
+                                         accuracy_img, train_test_comparison_img, combined_cm_img)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                                     """, (
                                         upload_id,
                                         knn_cm_img,
                                         dt_cm_img,
                                         performance_comparison_img,
-                                        accuracy_img
+                                        accuracy_img,
+                                        train_test_comparison_img,
+                                        combined_cm_img
                                     ))
                                 
                                 conn.commit()
@@ -1228,19 +1619,33 @@ def process_file():
             return jsonify(convert_numpy_types({
                 'knn_accuracy': knn_acc,
                 'dt_accuracy': dt_acc,
+                'knn_train_accuracy': knn_train_acc,
+                'dt_train_accuracy': dt_train_acc,
                 'knn_cm_img': knn_cm_img,
                 'dt_cm_img': dt_cm_img,
                 'accuracy_img': accuracy_img,
                 'performance_comparison_img': performance_comparison_img,
-                'results_table': results_table,
+                'train_test_comparison_img': train_test_comparison_img,
+                'combined_cm_img': combined_cm_img,
+                'results_table': results_table,  # Data testing
+                'training_results_table': training_results_table,  # Data training
                 'categories': unique_labels,
                 'knn_detailed': knn_detailed,
                 'dt_detailed': dt_detailed,
-                'upload_id': upload_id  # Tambahkan upload_id untuk referensi
+                'upload_id': upload_id,
+                'data_split_info': {
+                    'total_data': len(balanced_embeddings),
+                    'training_size': len(y_train),
+                    'testing_size': len(y_test),
+                    'training_percentage': (len(y_train) / len(balanced_embeddings)) * 100,
+                    'testing_percentage': (len(y_test) / len(balanced_embeddings)) * 100
+                }
             }))
             
         except Exception as e:
             print(f"Error processing file: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'error': str(e)}), 500
     
     return jsonify({'error': 'File type not allowed'}), 400
@@ -1255,574 +1660,842 @@ def predict_title():
     
     try:
         title = data['title']
-        upload_id = data.get('upload_id')  # Tambahkan parameter upload_id
+        upload_id = data.get('upload_id', None)
         
         # Cek apakah model sudah dilatih
         if trained_knn is None or trained_dt is None:
-            return jsonify({'error': 'Models have not been trained yet. Please process data first.'}), 400
+            return jsonify({'error': 'Models not trained yet. Please upload and process training data first.'}), 400
         
-        # Generate embedding untuk judul baru
+        # Buat embedding untuk judul baru
         embedding = get_embedding(title)
-        
-        # Tambahkan fitur domain
         enhanced_embedding = create_enhanced_features(embedding, title)
         
-        # Terapkan PCA jika tersedia
-        if pca_model is not None:
-            reduced_embedding = pca_model.transform([enhanced_embedding])[0]
-        else:
-            reduced_embedding = enhanced_embedding
+        # Terapkan transformasi yang sama seperti saat training
+        if pca_model is None or feature_selector is None:
+            return jsonify({'error': 'Feature transformation models not available. Please retrain the models.'}), 400
         
-        # Terapkan feature selection jika tersedia
-        if feature_selector is not None:
-            selected_embedding = feature_selector.transform([reduced_embedding])[0]
-        else:
-            selected_embedding = reduced_embedding
+        # Reduksi dimensi dan seleksi fitur
+        reduced_embedding = pca_model.transform([enhanced_embedding])
+        selected_features = feature_selector.transform(reduced_embedding)
         
-        # Prediksi dengan KNN
-        knn_pred = trained_knn.predict([selected_embedding])[0]
+        # Prediksi dengan kedua model
+        knn_pred = trained_knn.predict(selected_features)[0]
+        dt_pred = trained_dt.predict(selected_features)[0]
         
-        # Prediksi dengan Decision Tree
-        dt_pred = trained_dt.predict([selected_embedding])[0]
+        # Dapatkan confidence score jika tersedia
+        knn_confidence = 0.0
+        dt_confidence = 0.0
         
-        # Hitung keyakinan prediksi (untuk KNN)
-        distances, indices = trained_knn.kneighbors([selected_embedding])
-        nearest_titles = [f"Jarak: {distances[0][i]:.4f}" for i in range(len(indices[0]))]
-        
-        # Confidence score berdasarkan jarak
-        confidence = float(1.0 - distances[0][0])
-        
-        # Simpan cache embedding ke disk
-        save_embedding_cache()
-        
-        # Simpan prediksi ke database dengan upload_id jika ada
         try:
-            # Prediksi single title biasanya tidak punya actual_category
-            # Gunakan knn_pred sebagai actual_category untuk konsistensi
-            prediction_id = save_prediction_to_db(
-                title,
-                knn_pred,  # Gunakan knn_pred sebagai actual_category
-                knn_pred,
-                dt_pred,
-                confidence,
-                upload_id  # Tambahkan upload_id
-            )
-        except Exception as e:
-            print(f"Error saving prediction to database: {str(e)}")
-            prediction_id = None
+            if hasattr(trained_knn, 'predict_proba'):
+                knn_proba = trained_knn.predict_proba(selected_features)[0]
+                knn_confidence = float(max(knn_proba))
+            
+            if hasattr(trained_dt, 'predict_proba'):
+                dt_proba = trained_dt.predict_proba(selected_features)[0]
+                dt_confidence = float(max(dt_proba))
+        except:
+            pass
         
-        # Kirim hasil ke frontend dengan konversi nilai numpy
-        result = convert_numpy_types({
+        # Ensemble prediction (voting)
+        ensemble_pred = knn_pred if knn_pred == dt_pred else knn_pred  # Default ke KNN jika berbeda
+        
+        # Simpan hasil prediksi ke database
+        prediction_id = save_prediction_to_db(
+            title, 
+            'Unknown',  # Actual category tidak diketahui untuk prediksi baru
+            knn_pred, 
+            dt_pred, 
+            max(knn_confidence, dt_confidence),
+            upload_id
+        )
+        
+        return jsonify(convert_numpy_types({
             'title': title,
             'knn_prediction': knn_pred,
             'dt_prediction': dt_pred,
-            'nearest_neighbors': nearest_titles,
-            'knn_confidence': confidence,
+            'ensemble_prediction': ensemble_pred,
+            'knn_confidence': knn_confidence,
+            'dt_confidence': dt_confidence,
             'prediction_id': prediction_id
-        })
-        
-        return jsonify(result)
+        }))
         
     except Exception as e:
         print(f"Error in prediction: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Endpoint untuk mencari judul serupa
-@app.route('/similar', methods=['POST'])
-def find_similar_titles():
-    data = request.json
-    
-    if 'title' not in data:
-        return jsonify({'error': 'No title provided'}), 400
-    
+# Endpoint untuk mendapatkan riwayat prediksi
+@app.route('/history', methods=['GET'])
+def get_prediction_history():
     try:
-        title = data['title']
-        limit = data.get('limit', 5)  # Default 5 hasil
-        upload_id = data.get('upload_id')  # Tambahkan parameter upload_id
-        
-        # Generate embedding untuk judul
-        embedding = get_embedding(title)
-        
-        # Tambahkan fitur domain jika model dilatih dengan fitur tersebut
-        if pca_model is not None or feature_selector is not None:
-            enhanced_embedding = create_enhanced_features(embedding, title)
-            
-            # Terapkan PCA jika tersedia
-            if pca_model is not None:
-                embedding = pca_model.transform([enhanced_embedding])[0]
-            else:
-                embedding = enhanced_embedding
-            
-            # Terapkan feature selection jika tersedia
-            if feature_selector is not None:
-                embedding = feature_selector.transform([embedding])[0]
-        
-        # Ambil semua judul dari database
         conn = get_db_connection()
         if conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                    SELECT t.id, t.title, c.name as category
-                    FROM thesis_titles t
-                    JOIN categories c ON t.category_id = c.id
+                    SELECT p.id, p.title, p.confidence, p.created_at,
+                           c1.name as actual_category,
+                           c2.name as knn_prediction,
+                           c3.name as dt_prediction,
+                           uf.original_filename
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                    LEFT JOIN uploaded_files uf ON p.upload_file_id = uf.id
+                    ORDER BY p.created_at DESC
+                    LIMIT 100
                 """)
-                all_titles = cursor.fetchall()
+                
+                predictions = cursor.fetchall()
+                return jsonify(convert_numpy_types(predictions))
             conn.close()
-        
-            # Hitung similarity dengan cosine similarity
-            similarities = []
-            for db_title in all_titles:
-                # Dapatkan embedding dari judul di database
-                db_embedding = get_embedding(db_title['title'])
-                
-                # Proses embedding database dengan cara yang sama
-                if pca_model is not None or feature_selector is not None:
-                    enhanced_db_embedding = create_enhanced_features(db_embedding, db_title['title'])
-                    
-                    if pca_model is not None:
-                        db_embedding = pca_model.transform([enhanced_db_embedding])[0]
-                    else:
-                        db_embedding = enhanced_db_embedding
-                    
-                    if feature_selector is not None:
-                        db_embedding = feature_selector.transform([db_embedding])[0]
-                
-                # Hitung cosine similarity
-                similarity = np.dot(embedding, db_embedding) / (np.linalg.norm(embedding) * np.linalg.norm(db_embedding))
-                
-                similarities.append({
-                    'id': db_title['id'],
-                    'title': db_title['title'],
-                    'category': db_title['category'],
-                    'similarity': float(similarity)
-                })
-            
-            # Urutkan berdasarkan similarity (terdekat dulu)
-            similarities.sort(key=lambda x: x['similarity'], reverse=True)
-            
-            # Prediksi kategori berdasarkan KNN
-            if trained_knn is not None:
-                predicted_category = trained_knn.predict([embedding])[0]
-            else:
-                # Jika model belum ditraining, ambil kategori dari judul terdekat
-                predicted_category = similarities[0]['category'] if similarities else None
-            
-            # Batasi jumlah hasil
-            similar_titles = similarities[:limit]
-            
-            # Simpan pencarian ke database jika fitur search_history ada
-            try:
-                conn = get_db_connection()
-                if conn:
-                    with conn.cursor() as cursor:
-                        # Cek apakah tabel search_history ada
-                        cursor.execute("SHOW TABLES LIKE 'search_history'")
-                        table_exists = cursor.fetchone()
-                        
-                        if table_exists:
-                            # Simpan pencarian
-                            cursor.execute("""
-                                INSERT INTO search_history (query, predicted_category, upload_file_id)
-                                VALUES (%s, %s, %s)
-                            """, (title, predicted_category, upload_id))
-                            conn.commit()
-                    conn.close()
-            except Exception as e:
-                print(f"Error saving search history: {str(e)}")
-            
-            # Kirim hasil ke frontend dengan konversi nilai numpy
-            return jsonify(convert_numpy_types({
-                'query': title,
-                'similar_titles': similar_titles,
-                'predicted_category': predicted_category
-            }))
-        else:
-            return jsonify({'error': 'Database connection failed'}), 500
-        
     except Exception as e:
-        print(f"Error finding similar titles: {str(e)}")
+        print(f"Error getting prediction history: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Endpoint untuk download template Excel
-@app.route('/template', methods=['GET'])
-def get_template():
-    try:
-        # Buat file Excel template
-        df = pd.DataFrame({
-            'Judul Skripsi': ['Contoh Judul Skripsi 1', 'Contoh Judul Skripsi 2'],
-            'Kategori': ['RPL', 'Jaringan']
-        })
-        
-        # Simpan ke buffer
-        buffer = BytesIO()
-        df.to_excel(buffer, index=False)
-        buffer.seek(0)
-        
-        # Encode sebagai base64
-        excel_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        return jsonify({
-            'data': excel_data,
-            'filename': 'template_klasifikasi_skripsi.xlsx'
-        })
-    except Exception as e:
-        print(f"Error creating template: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-# Endpoint untuk menghapus prediksi berdasarkan ID
-@app.route('/delete_prediction/<int:prediction_id>', methods=['DELETE'])
-def delete_prediction(prediction_id):
+# Endpoint untuk mendapatkan performa model
+@app.route('/model_performance', methods=['GET'])
+def get_model_performance():
     try:
         conn = get_db_connection()
         if conn:
             with conn.cursor() as cursor:
-                # Periksa apakah prediksi ada
-                cursor.execute("SELECT id FROM predictions WHERE id = %s", (prediction_id,))
-                prediction = cursor.fetchone()
+                cursor.execute("""
+                    SELECT mp.id, mp.model_name, mp.accuracy, mp.parameters, mp.created_at,
+                           uf.original_filename
+                    FROM model_performances mp
+                    LEFT JOIN uploaded_files uf ON mp.upload_file_id = uf.id
+                    ORDER BY mp.created_at DESC
+                    LIMIT 50
+                """)
                 
-                if not prediction:
-                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
+                performances = cursor.fetchall()
                 
-                # Hapus prediksi
-                cursor.execute("DELETE FROM predictions WHERE id = %s", (prediction_id,))
+                # Parse JSON parameters
+                for perf in performances:
+                    if perf['parameters']:
+                        try:
+                            perf['parameters'] = json.loads(perf['parameters'])
+                        except:
+                            perf['parameters'] = {}
+                
+                return jsonify(convert_numpy_types(performances))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting model performance: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan analisis kata kunci
+@app.route('/keyword_analysis', methods=['GET'])
+def get_keyword_analysis():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT ka.id, ka.keyword, ka.frequency, ka.created_at,
+                           c.name as category_name,
+                           uf.original_filename
+                    FROM keyword_analysis ka
+                    LEFT JOIN categories c ON ka.category_id = c.id
+                    LEFT JOIN uploaded_files uf ON ka.upload_file_id = uf.id
+                    ORDER BY c.name, ka.frequency DESC
+                """)
+                
+                keywords = cursor.fetchall()
+                
+                # Group by category
+                grouped_keywords = {}
+                for keyword in keywords:
+                    category = keyword['category_name']
+                    if category not in grouped_keywords:
+                        grouped_keywords[category] = []
+                    grouped_keywords[category].append(keyword)
+                
+                return jsonify(convert_numpy_types(grouped_keywords))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting keyword analysis: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan statistik umum
+@app.route('/statistics', methods=['GET'])
+def get_statistics():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                stats = {}
+                
+                # Total prediksi
+                cursor.execute("SELECT COUNT(*) as total FROM predictions")
+                stats['total_predictions'] = cursor.fetchone()['total']
+                
+                # Total file yang diupload
+                cursor.execute("SELECT COUNT(*) as total FROM uploaded_files")
+                stats['total_uploads'] = cursor.fetchone()['total']
+                
+                # Total judul skripsi
+                cursor.execute("SELECT COUNT(*) as total FROM thesis_titles")
+                stats['total_thesis'] = cursor.fetchone()['total']
+                
+                # Distribusi kategori
+                cursor.execute("""
+                    SELECT c.name, COUNT(tt.id) as count
+                    FROM categories c
+                    LEFT JOIN thesis_titles tt ON c.id = tt.category_id
+                    GROUP BY c.id, c.name
+                """)
+                stats['category_distribution'] = cursor.fetchall()
+                
+                # Akurasi rata-rata model
+                cursor.execute("""
+                    SELECT model_name, AVG(accuracy) as avg_accuracy, COUNT(*) as count
+                    FROM model_performances
+                    GROUP BY model_name
+                """)
+                stats['model_accuracies'] = cursor.fetchall()
+                
+                # Prediksi terbaru
+                cursor.execute("""
+                    SELECT p.title, c1.name as knn_pred, c2.name as dt_pred, p.created_at
+                    FROM predictions p
+                    LEFT JOIN categories c1 ON p.knn_prediction_id = c1.id
+                    LEFT JOIN categories c2 ON p.dt_prediction_id = c2.id
+                    ORDER BY p.created_at DESC
+                    LIMIT 5
+                """)
+                stats['recent_predictions'] = cursor.fetchall()
+                
+                return jsonify(convert_numpy_types(stats))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting statistics: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan visualisasi yang tersimpan
+@app.route('/visualizations/<int:upload_id>', methods=['GET'])
+def get_visualizations(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img, 
+                           train_test_comparison_img, combined_cm_img
+                    FROM model_visualizations
+                    WHERE upload_file_id = %s
+                """, (upload_id,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return jsonify(convert_numpy_types(result))
+                else:
+                    return jsonify({'error': 'Visualizations not found'}), 404
+            conn.close()
+    except Exception as e:
+        print(f"Error getting visualizations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan daftar file yang diupload
+@app.route('/uploads', methods=['GET'])
+def get_uploads():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, original_filename, file_size, processed, created_at
+                    FROM uploaded_files
+                    ORDER BY created_at DESC
+                """)
+                
+                uploads = cursor.fetchall()
+                return jsonify(convert_numpy_types(uploads))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting uploads: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk menghapus data upload dan hasil terkait
+@app.route('/delete_upload/<int:upload_id>', methods=['DELETE'])
+def delete_upload(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                # Hapus data terkait secara berurutan (karena foreign key constraints)
+                cursor.execute("DELETE FROM keyword_analysis WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM predictions WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM model_performances WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM thesis_titles WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM training_data WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM model_metrics WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM confusion_matrix_data WHERE upload_file_id = %s", (upload_id,))
+                cursor.execute("DELETE FROM data_split_info WHERE upload_file_id = %s", (upload_id,))
+                
+                # Hapus visualisasi jika ada
+                cursor.execute("DELETE FROM model_visualizations WHERE upload_file_id = %s", (upload_id,))
+                
+                # Hapus record upload file
+                cursor.execute("DELETE FROM uploaded_files WHERE id = %s", (upload_id,))
+                
                 conn.commit()
                 
-                return jsonify({'success': True, 'message': 'Prediction deleted successfully'})
+                return jsonify({'message': 'Upload data deleted successfully'})
             conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
     except Exception as e:
-        print(f"Error deleting prediction: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"Error deleting upload: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-# Endpoint untuk mengambil semua prediksi (untuk halaman history)
-@app.route('/get_predictions', methods=['GET'])
-def get_predictions():
+# Endpoint untuk reset semua model dan data
+@app.route('/reset', methods=['POST'])
+def reset_models():
     try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, p.upload_file_id,
-                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                    FROM predictions p
-                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                    ORDER BY p.prediction_date DESC
-                """)
-                predictions = cursor.fetchall()
-                
-                # Konversi datetime ke string
-                for pred in predictions:
-                    if 'prediction_date' in pred and pred['prediction_date']:
-                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({'success': True, 'predictions': predictions})
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        global trained_knn, trained_dt, pca_model, feature_selector, embedding_cache, train_features, train_labels
+        
+        # Reset variabel global
+        trained_knn = None
+        trained_dt = None
+        pca_model = None
+        feature_selector = None
+        embedding_cache = {}
+        train_features = []
+        train_labels = []
+        
+        # Hapus file model
+        for filename in [MODEL_FILENAME, PCA_FILENAME, SELECTOR_FILENAME, EMBEDDING_CACHE_FILENAME]:
+            if os.path.exists(filename):
+                os.remove(filename)
+        
+        return jsonify({'message': 'Models and cache reset successfully'})
+        
     except Exception as e:
-        print(f"Error getting predictions: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"Error resetting models: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-# Endpoint untuk mendapatkan detail prediksi berdasarkan ID
-@app.route('/get_prediction/<int:prediction_id>', methods=['GET'])
-def get_prediction_detail(prediction_id):
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, p.upload_file_id,
-                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                    FROM predictions p
-                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                    WHERE p.id = %s
-                """, (prediction_id,))
-                prediction = cursor.fetchone()
-                
-                if not prediction:
-                    return jsonify({'success': False, 'error': 'Prediction not found'}), 404
-                
-                # Konversi datetime ke string
-                if 'prediction_date' in prediction and prediction['prediction_date']:
-                    prediction['prediction_date'] = prediction['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({'success': True, 'prediction': prediction})
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting prediction detail: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# Endpoint baru untuk mendapatkan prediksi berdasarkan upload_id
-@app.route('/get_predictions_by_upload/<int:upload_id>', methods=['GET'])
-def get_predictions_by_upload(upload_id):
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.id, p.title, p.actual_category_id, p.knn_prediction_id, p.dt_prediction_id, 
-                           p.confidence, p.prediction_date, 
-                           c1.name as actual_category, c2.name as knn_prediction, c3.name as dt_prediction 
-                    FROM predictions p
-                    LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-                    LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-                    LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-                    WHERE p.upload_file_id = %s
-                    ORDER BY p.prediction_date DESC
-                """, (upload_id,))
-                predictions = cursor.fetchall()
-                
-                # Konversi datetime ke string
-                for pred in predictions:
-                    if 'prediction_date' in pred and pred['prediction_date']:
-                        pred['prediction_date'] = pred['prediction_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                # Dapatkan informasi file yang diupload
-                cursor.execute("""
-                    SELECT id, original_filename, file_size, upload_date, processed
-                    FROM uploaded_files
-                    WHERE id = %s
-                """, (upload_id,))
-                file_info = cursor.fetchone()
-                
-                if file_info and 'upload_date' in file_info and file_info['upload_date']:
-                    file_info['upload_date'] = file_info['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({
-                    'success': True, 
-                    'predictions': predictions,
-                    'file_info': file_info
-                })
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting predictions by upload: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# Endpoint untuk mendapatkan daftar file yang telah diupload
-@app.route('/get_uploaded_files', methods=['GET'])
-def get_uploaded_files():
-    try:
-        conn = get_db_connection()
-        if conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT uf.id, uf.original_filename, uf.file_size, uf.upload_date, uf.processed,
-                           COUNT(p.id) as prediction_count
-                    FROM uploaded_files uf
-                    LEFT JOIN predictions p ON uf.id = p.upload_file_id
-                    GROUP BY uf.id
-                    ORDER BY uf.upload_date DESC
-                """)
-                files = cursor.fetchall()
-                
-                # Konversi datetime ke string
-                for file in files:
-                    if 'upload_date' in file and file['upload_date']:
-                        file['upload_date'] = file['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-                
-                return jsonify({'success': True, 'files': files})
-            conn.close()
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    except Exception as e:
-        print(f"Error getting uploaded files: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# Endpoint untuk mengecek status model dan akurasi terkini
+# Endpoint untuk mendapatkan status model
 @app.route('/model_status', methods=['GET'])
 def get_model_status():
     try:
-        # Cek apakah model sudah dilatih
-        if trained_knn is None or trained_dt is None:
-            return jsonify({
-                'success': True,
-                'models_trained': False,
-                'message': 'Models have not been trained yet.'
-            })
+        status = {
+            'knn_trained': trained_knn is not None,
+            'dt_trained': trained_dt is not None,
+            'pca_available': pca_model is not None,
+            'feature_selector_available': feature_selector is not None,
+            'embedding_cache_size': len(embedding_cache),
+            'training_data_size': len(train_features) if train_features else 0
+        }
         
-        # Ambil performa model terakhir dari database
+        return jsonify(convert_numpy_types(status))
+        
+        
+    except Exception as e:
+        print(f"Error getting model status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan confusion matrix data dari database
+@app.route('/confusion_matrix/<int:upload_id>', methods=['GET'])
+def get_confusion_matrix_data(upload_id):
+    try:
         conn = get_db_connection()
         if conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
-                    SELECT model_name, accuracy, parameters, created_at
-                    FROM model_performances
-                    ORDER BY created_at DESC
-                    LIMIT 2
-                """)
-                performances = cursor.fetchall()
+                    SELECT cmd.model_name, cmd.count,
+                           c1.name as actual_category,
+                           c2.name as predicted_category
+                    FROM confusion_matrix_data cmd
+                    LEFT JOIN categories c1 ON cmd.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON cmd.predicted_category_id = c2.id
+                    WHERE cmd.upload_file_id = %s
+                    ORDER BY cmd.model_name, c1.name, c2.name
+                """, (upload_id,))
                 
-                # Konversi datetime ke string
-                for perf in performances:
-                    if 'created_at' in perf and perf['created_at']:
-                        perf['created_at'] = perf['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                cm_data = cursor.fetchall()
                 
-                # Buat statistik model
-                model_stats = {
-                    'models_trained': True,
-                    'knn_params': None,
-                    'dt_params': None,
-                    'knn_accuracy': None,
-                    'dt_accuracy': None,
-                    'last_trained': None,
-                    'embedding_cache_size': len(embedding_cache),
-                    'train_data_size': len(train_features) if train_features else 0
-                }
+                # Group by model
+                grouped_data = {}
+                for row in cm_data:
+                    model = row['model_name']
+                    if model not in grouped_data:
+                        grouped_data[model] = []
+                    grouped_data[model].append(row)
                 
-                # Tambahkan informasi performa
-                for perf in performances:
-                    if 'KNN' in perf['model_name']:
-                        model_stats['knn_params'] = perf['parameters']
-                        model_stats['knn_accuracy'] = perf['accuracy']
-                        model_stats['last_trained'] = perf['created_at']
-                    elif 'Tree' in perf['model_name'] or 'DT' in perf['model_name']:
-                        model_stats['dt_params'] = perf['parameters']
-                        model_stats['dt_accuracy'] = perf['accuracy']
-                        if not model_stats['last_trained']:
-                            model_stats['last_trained'] = perf['created_at']
-            
-            # Tambahkan info kategori
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT name FROM categories")
-                categories = cursor.fetchall()
-                model_stats['available_categories'] = [cat['name'] for cat in categories]
-            
+                return jsonify(convert_numpy_types(grouped_data))
             conn.close()
-            return jsonify({'success': True, **model_stats})
-        else:
-            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
-    
     except Exception as e:
-        print(f"Error checking model status: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"Error getting confusion matrix data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-# Endpoint baru untuk model tuning manual (untuk percobaan parameter)
-@app.route('/tune_model', methods=['POST'])
-def tune_model():
-    data = request.json
-    
-    if not data:
-        return jsonify({'error': 'No parameters provided'}), 400
-    
+# Endpoint untuk mendapatkan metrik detail model
+@app.route('/model_metrics/<int:upload_id>', methods=['GET'])
+def get_model_metrics(upload_id):
     try:
-        # Cek apakah data training tersedia
-        if not train_features or not train_labels:
-            return jsonify({'error': 'No training data available. Please upload and process data first.'}), 400
-        
-        # Parameter untuk tuning
-        knn_params = data.get('knn', {})
-        dt_params = data.get('dt', {})
-        upload_id = data.get('upload_id')  # Ambil upload_id jika ada
-        
-        # Default values jika tidak ada
-        n_neighbors = knn_params.get('n_neighbors', 3)
-        weights = knn_params.get('weights', 'uniform')
-        max_depth = dt_params.get('max_depth', None)
-        criterion = dt_params.get('criterion', 'gini')
-        min_samples_split = dt_params.get('min_samples_split', 2)
-        use_bagging = dt_params.get('use_bagging', True)
-        n_estimators = dt_params.get('n_estimators', 10)
-        
-        # Bagi data menjadi train dan test (gunakan yang sudah ada)
-        X_train, X_test, y_train, y_test = train_test_split(
-            train_features, train_labels, test_size=0.2, random_state=42, stratify=train_labels
-        )
-        
-        # Train KNN dengan parameter yang diberikan
-        print(f"Training KNN with n_neighbors={n_neighbors}, weights={weights}")
-        knn = KNNDetailedModel(n_neighbors=n_neighbors, weights=weights)
-        knn.fit(X_train, y_train)
-        knn_metrics = knn.evaluate(X_test, y_test)
-        knn_acc = knn_metrics['accuracy']
-        
-        # Train Decision Tree dengan parameter yang diberikan
-        print(f"Training DT with max_depth={max_depth}, criterion={criterion}, min_samples_split={min_samples_split}")
-        if use_bagging:
-            dt = BaggedDTDetailedModel(
-                max_depth=max_depth,
-                criterion=criterion,
-                min_samples_split=min_samples_split,
-                random_state=42,
-                n_estimators=n_estimators
-            )
-        else:
-            dt = DTDetailedModel(
-                max_depth=max_depth,
-                criterion=criterion,
-                min_samples_split=min_samples_split,
-                random_state=42
-            )
-        
-        dt.fit(X_train, y_train)
-        dt_metrics = dt.evaluate(X_test, y_test)
-        dt_acc = dt_metrics['accuracy']
-        
-        # Simpan performa ke database dengan upload_id
-        save_model_performance('KNN (Manual Tuning)', knn_acc, {'n_neighbors': n_neighbors, 'weights': weights}, upload_id)
-        
-        dt_perf_params = {
-            'max_depth': max_depth, 
-            'criterion': criterion,
-            'min_samples_split': min_samples_split
-        }
-        if use_bagging:
-            dt_perf_params['use_bagging'] = True
-            dt_perf_params['n_estimators'] = n_estimators
-            
-        save_model_performance('Decision Tree (Manual Tuning)', dt_acc, dt_perf_params, upload_id)
-        
-        # Simpan model jika akurasi lebih baik dari yang ada
-        global trained_knn, trained_dt
-        
-        if trained_knn is None or knn_acc > 0.8:  # Hanya simpan jika akurasi >80% atau tidak ada model sebelumnya
-            trained_knn = knn.model
-            trained_dt = dt.model
-            
-            # Simpan model ke disk
-            models_data = {
-                'knn': knn.model,
-                'dt': dt.model,
-                'train_features': train_features,
-                'train_labels': train_labels,
-                'pca_model': pca_model,
-                'feature_selector': feature_selector,
-                'preprocessing_params': {
-                    'max_length': MAX_LENGTH,
-                    'embedding_method': 'combined_pooling'
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT model_name, data_type, accuracy, precision_macro, recall_macro, f1_macro,
+                           precision_weighted, recall_weighted, f1_weighted, created_at
+                    FROM model_metrics
+                    WHERE upload_file_id = %s
+                    ORDER BY model_name, data_type
+                """, (upload_id,))
+                
+                metrics = cursor.fetchall()
+                
+                # Group by model and data type
+                grouped_metrics = {}
+                for metric in metrics:
+                    model = metric['model_name']
+                    data_type = metric['data_type']
+                    key = f"{model}_{data_type}"
+                    grouped_metrics[key] = metric
+                
+                return jsonify(convert_numpy_types(grouped_metrics))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting model metrics: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan data training/testing
+@app.route('/training_data/<int:upload_id>', methods=['GET'])
+def get_training_data(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT td.title, td.data_type, td.is_correct_knn, td.is_correct_dt,
+                           c1.name as actual_category,
+                           c2.name as knn_prediction,
+                           c3.name as dt_prediction,
+                           td.created_at
+                    FROM training_data td
+                    LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+                    WHERE td.upload_file_id = %s
+                    ORDER BY td.data_type, td.created_at
+                """, (upload_id,))
+                
+                training_data = cursor.fetchall()
+                
+                # Separate training and testing data
+                result = {
+                    'training': [],
+                    'testing': []
                 }
-            }
-            save_complete_models(models_data)
+                
+                for row in training_data:
+                    data_type = row['data_type']
+                    if data_type in result:
+                        result[data_type].append(row)
+                
+                return jsonify(convert_numpy_types(result))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting training data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan informasi split data
+@app.route('/data_split_info/<int:upload_id>', methods=['GET'])
+def get_data_split_info(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT total_data, training_size, testing_size, training_percentage, 
+                           testing_percentage, split_method, random_state, created_at
+                    FROM data_split_info
+                    WHERE upload_file_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (upload_id,))
+                
+                split_info = cursor.fetchone()
+                
+                if split_info:
+                    return jsonify(convert_numpy_types(split_info))
+                else:
+                    return jsonify({'error': 'Data split info not found'}), 404
+            conn.close()
+    except Exception as e:
+        print(f"Error getting data split info: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk mendapatkan kategori yang tersedia
+@app.route('/categories', methods=['GET'])
+def get_categories():
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, name, description, created_at
+                    FROM categories
+                    ORDER BY name
+                """)
+                
+                categories = cursor.fetchall()
+                return jsonify(convert_numpy_types(categories))
+            conn.close()
+    except Exception as e:
+        print(f"Error getting categories: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk menambah kategori baru
+@app.route('/categories', methods=['POST'])
+def add_category():
+    try:
+        data = request.json
+        if 'name' not in data:
+            return jsonify({'error': 'Category name is required'}), 400
         
-        # Kirim hasil
-        return jsonify({
-            'success': True,
-            'knn_accuracy': knn_acc,
-            'dt_accuracy': dt_acc,
-            'knn_parameters': {'n_neighbors': n_neighbors, 'weights': weights},
-            'dt_parameters': dt_perf_params,
-            'models_saved': knn_acc > 0.8 or trained_knn is None,
+        name = data['name']
+        description = data.get('description', '')
+        
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                # Cek apakah kategori sudah ada
+                cursor.execute("SELECT id FROM categories WHERE name = %s", (name,))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    return jsonify({'error': 'Category already exists'}), 400
+                
+                # Tambah kategori baru
+                cursor.execute("""
+                    INSERT INTO categories (name, description)
+                    VALUES (%s, %s)
+                """, (name, description))
+                
+                conn.commit()
+                category_id = cursor.lastrowid
+                
+                return jsonify({
+                    'id': category_id,
+                    'name': name,
+                    'description': description,
+                    'message': 'Category added successfully'
+                })
+            conn.close()
+    except Exception as e:
+        print(f"Error adding category: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk batch prediction (prediksi multiple judul sekaligus)
+@app.route('/batch_predict', methods=['POST'])
+def batch_predict():
+    try:
+        data = request.json
+        
+        if 'titles' not in data or not isinstance(data['titles'], list):
+            return jsonify({'error': 'Titles array is required'}), 400
+        
+        titles = data['titles']
+        upload_id = data.get('upload_id', None)
+        
+        # Cek apakah model sudah dilatih
+        if trained_knn is None or trained_dt is None:
+            return jsonify({'error': 'Models not trained yet. Please upload and process training data first.'}), 400
+        
+        if pca_model is None or feature_selector is None:
+            return jsonify({'error': 'Feature transformation models not available. Please retrain the models.'}), 400
+        
+        results = []
+        
+        for title in titles:
+            if not title or not title.strip():
+                continue
+                
+            try:
+                # Buat embedding untuk judul
+                embedding = get_embedding(title)
+                enhanced_embedding = create_enhanced_features(embedding, title)
+                
+                # Terapkan transformasi yang sama seperti saat training
+                reduced_embedding = pca_model.transform([enhanced_embedding])
+                selected_features = feature_selector.transform(reduced_embedding)
+                
+                # Prediksi dengan kedua model
+                knn_pred = trained_knn.predict(selected_features)[0]
+                dt_pred = trained_dt.predict(selected_features)[0]
+                
+                # Dapatkan confidence score
+                knn_confidence = 0.0
+                dt_confidence = 0.0
+                
+                try:
+                    if hasattr(trained_knn, 'predict_proba'):
+                        knn_proba = trained_knn.predict_proba(selected_features)[0]
+                        knn_confidence = float(max(knn_proba))
+                    
+                    if hasattr(trained_dt, 'predict_proba'):
+                        dt_proba = trained_dt.predict_proba(selected_features)[0]
+                        dt_confidence = float(max(dt_proba))
+                except:
+                    pass
+                
+                # Ensemble prediction
+                ensemble_pred = knn_pred if knn_pred == dt_pred else knn_pred
+                
+                result = {
+                    'title': title,
+                    'knn_prediction': knn_pred,
+                    'dt_prediction': dt_pred,
+                    'ensemble_prediction': ensemble_pred,
+                    'knn_confidence': knn_confidence,
+                    'dt_confidence': dt_confidence
+                }
+                
+                results.append(result)
+                
+                # Simpan hasil prediksi ke database
+                save_prediction_to_db(
+                    title, 
+                    'Unknown',
+                    knn_pred, 
+                    dt_pred, 
+                    max(knn_confidence, dt_confidence),
+                    upload_id
+                )
+                
+            except Exception as e:
+                print(f"Error processing title '{title}': {str(e)}")
+                results.append({
+                    'title': title,
+                    'error': str(e)
+                })
+        
+        return jsonify(convert_numpy_types({
+            'results': results,
+            'total_processed': len(results),
             'upload_id': upload_id
+        }))
+        
+    except Exception as e:
+        print(f"Error in batch prediction: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk export hasil ke Excel
+@app.route('/export_results/<int:upload_id>', methods=['GET'])
+def export_results(upload_id):
+    try:
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cursor:
+                # Ambil data training/testing
+                cursor.execute("""
+                    SELECT td.title, td.data_type, td.is_correct_knn, td.is_correct_dt,
+                           c1.name as actual_category,
+                           c2.name as knn_prediction,
+                           c3.name as dt_prediction
+                    FROM training_data td
+                    LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+                    LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+                    LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+                    WHERE td.upload_file_id = %s
+                    ORDER BY td.data_type, td.title
+                """, (upload_id,))
+                
+                data = cursor.fetchall()
+                
+                if not data:
+                    return jsonify({'error': 'No data found for this upload'}), 404
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(data)
+                
+                # Simpan ke file Excel
+                filename = f"classification_results_{upload_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                
+                with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                    # Sheet untuk semua data
+                    df.to_excel(writer, sheet_name='All Results', index=False)
+                    
+                    # Sheet terpisah untuk training dan testing
+                    training_data = df[df['data_type'] == 'training']
+                    testing_data = df[df['data_type'] == 'testing']
+                    
+                    if not training_data.empty:
+                        training_data.to_excel(writer, sheet_name='Training Data', index=False)
+                    
+                    if not testing_data.empty:
+                        testing_data.to_excel(writer, sheet_name='Testing Data', index=False)
+                
+                return jsonify({
+                    'message': 'Results exported successfully',
+                    'filename': filename,
+                    'filepath': filepath,
+                    'total_records': len(data)
+                })
+            conn.close()
+    except Exception as e:
+        print(f"Error exporting results: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint untuk health check
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'models_loaded': {
+            'indobert': model is not None,
+            'knn': trained_knn is not None,
+            'dt': trained_dt is not None
+        },
+        'database_connection': get_db_connection() is not None
+    })
+
+# Endpoint untuk mendapatkan informasi sistem
+@app.route('/system_info', methods=['GET'])
+def get_system_info():
+    try:
+        import psutil
+        import torch
+        
+        # Informasi memori
+        memory = psutil.virtual_memory()
+        
+        # Informasi GPU jika tersedia
+        gpu_info = {}
+        if torch.cuda.is_available():
+            gpu_info = {
+                'gpu_available': True,
+                'gpu_count': torch.cuda.device_count(),
+                'current_device': torch.cuda.current_device(),
+                'device_name': torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'Unknown'
+            }
+        else:
+            gpu_info = {'gpu_available': False}
+        
+        # Informasi cache dan model
+        cache_info = {
+            'embedding_cache_size': len(embedding_cache),
+            'cache_file_exists': os.path.exists(EMBEDDING_CACHE_FILENAME),
+            'model_files_exist': {
+                'main_model': os.path.exists(MODEL_FILENAME),
+                'pca_model': os.path.exists(PCA_FILENAME),
+                'feature_selector': os.path.exists(SELECTOR_FILENAME)
+            }
+        }
+        
+        return jsonify({
+            'memory': {
+                'total': memory.total,
+                'available': memory.available,
+                'percent': memory.percent,
+                'used': memory.used
+            },
+            'gpu': gpu_info,
+            'cache': cache_info,
+            'models_status': {
+                'knn_trained': trained_knn is not None,
+                'dt_trained': trained_dt is not None,
+                'pca_available': pca_model is not None,
+                'feature_selector_available': feature_selector is not None
+            },
+            'directories': {
+                'upload_folder': UPLOAD_FOLDER,
+                'model_folder': MODEL_FOLDER,
+                'cache_folder': CACHE_FOLDER
+            }
         })
         
+    except ImportError:
+        return jsonify({
+            'error': 'psutil not installed, limited system info available',
+            'basic_info': {
+                'models_status': {
+                    'knn_trained': trained_knn is not None,
+                    'dt_trained': trained_dt is not None,
+                    'pca_available': pca_model is not None,
+                    'feature_selector_available': feature_selector is not None
+                },
+                'cache_size': len(embedding_cache)
+            }
+        })
     except Exception as e:
-        print(f"Error tuning model: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
+
+# Error handler
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'File too large'}), 413
+
+# Cleanup function yang dipanggil saat aplikasi ditutup
+import atexit
+
+def cleanup():
+    print("Cleaning up...")
+    # Simpan cache embedding terakhir kali
+    save_embedding_cache()
+    
+    # Bersihkan memori
+    global embedding_cache, trained_knn, trained_dt
+    if embedding_cache:
+        embedding_cache.clear()
+    
+    # Force garbage collection
+    gc.collect()
+    
+    print("Cleanup completed")
+
+atexit.register(cleanup)
+
+# Konfigurasi tambahan untuk Flask
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+app.config['JSON_SORT_KEYS'] = False
 
 if __name__ == '__main__':
-    print(f"Server starting on http://localhost:5000")
+    print("=" * 60)
+    print("STARTING FLASK APPLICATION - THESIS CLASSIFICATION SYSTEM")
+    print("=" * 60)
     print(f"Upload folder: {UPLOAD_FOLDER}")
     print(f"Model folder: {MODEL_FOLDER}")
     print(f"Cache folder: {CACHE_FOLDER}")
-    # Jalankan server dalam mode non-threaded untuk menghindari masalah dengan matplotlib
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=False)
+    print(f"Max file size: {app.config['MAX_CONTENT_LENGTH'] / (1024*1024):.0f}MB")
+    print(f"Database config: {DB_CONFIG['host']}:{DB_CONFIG['db']}")
+    
+    # Cek koneksi database
+    test_conn = get_db_connection()
+    if test_conn:
+        print("✓ Database connection successful")
+        test_conn.close()
+    else:
+        print("✗ Database connection failed")
+    
+    # Cek model status
+    print(f"✓ IndoBERT model loaded: {model is not None}")
+    print(f"✓ KNN model trained: {trained_knn is not None}")
+    print(f"✓ DT model trained: {trained_dt is not None}")
+    print(f"✓ Embedding cache size: {len(embedding_cache)}")
+    
+    print("=" * 60)
+    print("Server starting on http://0.0.0.0:5000")
+    print("Available endpoints:")
+    print("  POST /process - Upload and process Excel file")
+    print("  POST /predict - Predict single title")
+    print("  POST /batch_predict - Predict multiple titles")
+    print("  GET  /history - Get prediction history")
+    print("  GET  /statistics - Get system statistics")
+    print("  GET  /health - Health check")
+    print("  GET  /system_info - System information")
+    print("=" * 60)
+    
+    # Jalankan aplikasi Flask
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

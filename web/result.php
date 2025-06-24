@@ -16,7 +16,8 @@ try {
 }
 
 // Ambil data dari database
-$results = [];
+$trainingResults = [];
+$testingResults = [];
 $upload_id = isset($_GET['upload_id']) ? intval($_GET['upload_id']) : null;
 $fileInfo = null;
 
@@ -25,20 +26,55 @@ $knnCmImg = null;
 $dtCmImg = null;
 $performanceComparisonImg = null;
 $accuracyImg = null;
+$trainTestComparisonImg = null;
+$combinedCmImg = null;
 
 if ($dbStatus) {
     if ($upload_id) {
-        // Ambil hasil berdasarkan upload_id
-        $results = $database->fetchAll("
-            SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
-                   p.confidence, p.prediction_date
-            FROM predictions p
-            LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-            LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-            LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-            WHERE p.upload_file_id = ?
-            ORDER BY p.id DESC
+        // Coba ambil data dari training_data terlebih dahulu
+        $trainingResults = $database->fetchAll("
+            SELECT td.id, td.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   td.is_correct_knn, td.is_correct_dt, td.created_at as prediction_date
+            FROM training_data td
+            LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+            WHERE td.upload_file_id = ? AND td.data_type = 'training'
+            ORDER BY td.id ASC
         ", [$upload_id]);
+        
+        $testingResults = $database->fetchAll("
+            SELECT td.id, td.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   td.is_correct_knn, td.is_correct_dt, td.created_at as prediction_date
+            FROM training_data td
+            LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+            WHERE td.upload_file_id = ? AND td.data_type = 'testing'
+            ORDER BY td.id ASC
+        ", [$upload_id]);
+        
+        // Jika training_data kosong, gunakan data dari predictions sebagai fallback
+        if (empty($trainingResults) && empty($testingResults)) {
+            // Ambil data dari predictions dan split secara manual
+            $allPredictions = $database->fetchAll("
+                SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                       p.confidence, p.prediction_date
+                FROM predictions p
+                LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                WHERE p.upload_file_id = ?
+                ORDER BY p.id ASC
+            ", [$upload_id]);
+            
+            // Split data 80:20 untuk training:testing
+            $totalCount = count($allPredictions);
+            $trainingCount = (int)($totalCount * 0.8);
+            
+            $trainingResults = array_slice($allPredictions, 0, $trainingCount);
+            $testingResults = array_slice($allPredictions, $trainingCount);
+        }
         
         // Dapatkan info file
         $fileInfo = $database->fetch("
@@ -49,27 +85,63 @@ if ($dbStatus) {
         
         // Ambil visualisasi berdasarkan upload_id
         $vizData = $database->fetch("
-            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img 
+            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img, 
+                   train_test_comparison_img, combined_cm_img
             FROM model_visualizations 
             WHERE upload_file_id = ?
             ORDER BY id DESC LIMIT 1
         ", [$upload_id]);
     } else {
-        // Ambil 100 hasil terbaru
-        $results = $database->fetchAll("
-            SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
-                   p.confidence, p.prediction_date
-            FROM predictions p
-            LEFT JOIN categories c1 ON p.actual_category_id = c1.id
-            LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
-            LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
-            ORDER BY p.prediction_date DESC
+        // Coba ambil data training terbaru dari training_data
+        $trainingResults = $database->fetchAll("
+            SELECT td.id, td.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   td.is_correct_knn, td.is_correct_dt, td.created_at as prediction_date
+            FROM training_data td
+            LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+            WHERE td.data_type = 'training'
+            ORDER BY td.created_at DESC
             LIMIT 100
         ");
         
+        $testingResults = $database->fetchAll("
+            SELECT td.id, td.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                   td.is_correct_knn, td.is_correct_dt, td.created_at as prediction_date
+            FROM training_data td
+            LEFT JOIN categories c1 ON td.actual_category_id = c1.id
+            LEFT JOIN categories c2 ON td.knn_prediction_id = c2.id
+            LEFT JOIN categories c3 ON td.dt_prediction_id = c3.id
+            WHERE td.data_type = 'testing'
+            ORDER BY td.created_at DESC
+            LIMIT 100
+        ");
+        
+        // Jika training_data kosong, gunakan data dari predictions
+        if (empty($trainingResults) && empty($testingResults)) {
+            $allPredictions = $database->fetchAll("
+                SELECT p.id, p.title, c1.name as actual, c2.name as knn_pred, c3.name as dt_pred, 
+                       p.confidence, p.prediction_date
+                FROM predictions p
+                LEFT JOIN categories c1 ON p.actual_category_id = c1.id
+                LEFT JOIN categories c2 ON p.knn_prediction_id = c2.id
+                LEFT JOIN categories c3 ON p.dt_prediction_id = c3.id
+                ORDER BY p.prediction_date DESC
+                LIMIT 100
+            ");
+            
+            // Split data untuk simulasi training/testing
+            $totalCount = count($allPredictions);
+            $trainingCount = (int)($totalCount * 0.8);
+            
+            $trainingResults = array_slice($allPredictions, 0, $trainingCount);
+            $testingResults = array_slice($allPredictions, $trainingCount);
+        }
+        
         // Ambil visualisasi terbaru
         $vizData = $database->fetch("
-            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img 
+            SELECT knn_cm_img, dt_cm_img, performance_comparison_img, accuracy_img,
+                   train_test_comparison_img, combined_cm_img
             FROM model_visualizations 
             ORDER BY id DESC LIMIT 1
         ");
@@ -80,21 +152,83 @@ if ($dbStatus) {
         $dtCmImg = $vizData['dt_cm_img'];
         $performanceComparisonImg = $vizData['performance_comparison_img'];
         $accuracyImg = $vizData['accuracy_img'];
+        $trainTestComparisonImg = $vizData['train_test_comparison_img'];
+        $combinedCmImg = $vizData['combined_cm_img'];
     }
 
-    // Hitung statistik
-    $totalCount = count($results);
-    $correctKNN = 0;
-    $correctDT = 0;
+    // Hitung statistik untuk training data
+    $trainingTotalCount = count($trainingResults);
+    $trainingCorrectKNN = 0;
+    $trainingCorrectDT = 0;
+    $trainingCategoryStats = [];
 
-    foreach ($results as $row) {
-        if ($row['actual'] == $row['knn_pred']) $correctKNN++;
-        if ($row['actual'] == $row['dt_pred']) $correctDT++;
+    foreach ($trainingResults as $row) {
+        if ($row['actual'] == $row['knn_pred']) $trainingCorrectKNN++;
+        if ($row['actual'] == $row['dt_pred']) $trainingCorrectDT++;
+        
+        // Hitung statistik per kategori
+        $category = $row['actual'];
+        if (!isset($trainingCategoryStats[$category])) {
+            $trainingCategoryStats[$category] = ['total' => 0, 'knn_correct' => 0, 'dt_correct' => 0];
+        }
+        $trainingCategoryStats[$category]['total']++;
+        if ($row['actual'] == $row['knn_pred']) $trainingCategoryStats[$category]['knn_correct']++;
+        if ($row['actual'] == $row['dt_pred']) $trainingCategoryStats[$category]['dt_correct']++;
     }
 
-    $knnAccuracy = $totalCount > 0 ? ($correctKNN / $totalCount) * 100 : 0;
-    $dtAccuracy = $totalCount > 0 ? ($correctDT / $totalCount) * 100 : 0;
+    $trainingKnnAccuracy = $trainingTotalCount > 0 ? ($trainingCorrectKNN / $trainingTotalCount) * 100 : 0;
+    $trainingDtAccuracy = $trainingTotalCount > 0 ? ($trainingCorrectDT / $trainingTotalCount) * 100 : 0;
+
+    // Hitung statistik untuk testing data
+    $testingTotalCount = count($testingResults);
+    $testingCorrectKNN = 0;
+    $testingCorrectDT = 0;
+    $testingCategoryStats = [];
+
+    foreach ($testingResults as $row) {
+        if ($row['actual'] == $row['knn_pred']) $testingCorrectKNN++;
+        if ($row['actual'] == $row['dt_pred']) $testingCorrectDT++;
+        
+        // Hitung statistik per kategori
+        $category = $row['actual'];
+        if (!isset($testingCategoryStats[$category])) {
+            $testingCategoryStats[$category] = ['total' => 0, 'knn_correct' => 0, 'dt_correct' => 0];
+        }
+        $testingCategoryStats[$category]['total']++;
+        if ($row['actual'] == $row['knn_pred']) $testingCategoryStats[$category]['knn_correct']++;
+        if ($row['actual'] == $row['dt_pred']) $testingCategoryStats[$category]['dt_correct']++;
+    }
+
+    $testingKnnAccuracy = $testingTotalCount > 0 ? ($testingCorrectKNN / $testingTotalCount) * 100 : 0;
+    $testingDtAccuracy = $testingTotalCount > 0 ? ($testingCorrectDT / $testingTotalCount) * 100 : 0;
 }
+
+// Gabungkan untuk kompatibilitas dengan kode lama
+$allResults = array_merge($trainingResults, $testingResults);
+$hasData = !empty($allResults);
+
+// Hitung distribusi kategori
+$allCategories = [];
+
+// Kumpulkan semua kategori unik dari training results
+foreach ($trainingResults as $row) {
+    if (!empty($row['actual']) && !in_array($row['actual'], $allCategories)) {
+        $allCategories[] = $row['actual'];
+    }
+}
+
+// Kumpulkan semua kategori unik dari testing results
+foreach ($testingResults as $row) {
+    if (!empty($row['actual']) && !in_array($row['actual'], $allCategories)) {
+        $allCategories[] = $row['actual'];
+    }
+}
+
+// Pastikan allCategories adalah array valid
+$allCategories = array_values(array_unique(array_filter($allCategories)));
+
+// Debug: tampilkan kategori yang ditemukan
+error_log("All categories found: " . print_r($allCategories, true));
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -316,41 +450,37 @@ if ($dbStatus) {
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
         
-        .bg-pattern {
+        /* Tambahan style untuk tabs */
+        .nav-tabs {
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        .nav-tabs .nav-link {
+            border: none;
+            color: #6c757d;
+            font-weight: 500;
+            padding: 12px 20px;
+            border-radius: 8px 8px 0 0;
+            margin-right: 5px;
+        }
+        
+        .nav-tabs .nav-link.active {
             background-color: var(--primary-color);
-            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-            padding: 50px 0;
-            margin-bottom: 30px;
-            border-radius: 0 0 20px 20px;
+            color: white;
         }
         
-        .model-detail-card {
-            margin-bottom: 20px;
-            position: relative;
-            overflow: hidden;
+        .nav-tabs .nav-link:hover {
+            background-color: rgba(67, 97, 238, 0.1);
+            color: var(--primary-color);
         }
         
-        .model-icon {
-            position: absolute;
-            right: -20px;
-            bottom: -20px;
-            font-size: 8rem;
-            opacity: 0.05;
-            transform: rotate(15deg);
+        .nav-tabs .nav-link.active:hover {
+            background-color: var(--secondary-color);
+            color: white;
         }
         
-        .knn-border {
-            border-left: 4px solid var(--primary-color);
-        }
-        
-        .dt-border {
-            border-left: 4px solid #198754;
-        }
-        
-        .metric-pill {
-            font-size: 0.85rem;
-            padding: 0.25rem 0.5rem;
-            border-radius: 20px;
+        .tab-content {
+            padding-top: 20px;
         }
         
         .highlight-row {
@@ -372,6 +502,61 @@ if ($dbStatus) {
         .filter-btn.active {
             background-color: var(--primary-color);
             color: white;
+        }
+        
+        /* Styles untuk statistik kategori */
+        .category-stats {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .category-card {
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+        
+        .category-card:hover {
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        /* Chart container styles */
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+        
+        .chart-small {
+            height: 250px;
         }
         
         @media (max-width: 768px) {
@@ -398,13 +583,17 @@ if ($dbStatus) {
             .badge-large {
                 font-size: 0.85rem;
             }
+            
+            .metric-value {
+                font-size: 1.5rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Tampilan ketika tidak ada data -->
-        <div id="noData" class="card fade-in" style="<?php echo (empty($results)) ? '' : 'display: none;'; ?>">
+        <div id="noData" class="card fade-in" style="<?php echo (!$hasData) ? '' : 'display: none;'; ?>">
             <div class="card-header">
                 <h3 class="text-center mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Data Tidak Ditemukan</h3>
             </div>
@@ -419,7 +608,7 @@ if ($dbStatus) {
         </div>
         
         <!-- Tampilan hasil klasifikasi -->
-        <div id="results" style="<?php echo (!empty($results)) ? '' : 'display: none;'; ?>">
+        <div id="results" style="<?php echo ($hasData) ? '' : 'display: none;'; ?>">
             <div class="card fade-in">
                 <div class="card-header">
                     <h2 class="text-center mb-0">Hasil Klasifikasi Judul Skripsi</h2>
@@ -517,8 +706,238 @@ if ($dbStatus) {
                         </div>
                     </nav>
                     
-                    <!-- Perbandingan Akurasi -->
+                    <!-- Ringkasan Data -->
                     <div class="section-card fade-in" style="animation-delay: 0.6s">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-pie-chart fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Ringkasan Dataset</h5>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-3 mb-3">
+                                        <div class="metric-card bg-primary text-white">
+                                            <div class="metric-value"><?= $trainingTotalCount + $testingTotalCount ?></div>
+                                            <div class="metric-label">Total Data</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <div class="metric-card bg-info text-white">
+                                            <div class="metric-value"><?= $trainingTotalCount ?></div>
+                                            <div class="metric-label">Data Training</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <div class="metric-card bg-success text-white">
+                                            <div class="metric-value"><?= $testingTotalCount ?></div>
+                                            <div class="metric-label">Data Testing</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <div class="metric-card bg-warning text-white">
+                                            <div class="metric-value"><?= count($allCategories) ?></div>
+                                            <div class="metric-label">Kategori</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Distribusi Data per Kategori -->
+                                <div class="mt-4">
+                                    <h6 class="fw-bold mb-3">Distribusi Data per Kategori</h6>
+                                    <div class="chart-container chart-small">
+                                        <canvas id="categoryDistributionChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Statistik Training vs Testing -->
+                    <div class="section-card fade-in" style="animation-delay: 0.7s">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-graph-up fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Perbandingan Akurasi Training vs Testing</h5>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <!-- Training Stats -->
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card h-100 border-primary">
+                                            <div class="card-header bg-primary text-white">
+                                                <h6 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Data Training</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="row text-center">
+                                                    <div class="col-6">
+                                                        <h5 class="text-primary"><?= number_format($trainingKnnAccuracy, 2) ?>%</h5>
+                                                        <small class="text-muted">KNN</small>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <h5 class="text-success"><?= number_format($trainingDtAccuracy, 2) ?>%</h5>
+                                                        <small class="text-muted">Decision Tree</small>
+                                                    </div>
+                                                </div>
+                                                <hr>
+                                                <div class="row">
+                                                    <div class="col-6 text-center">
+                                                        <small class="text-muted">Benar: <?= $trainingCorrectKNN ?></small>
+                                                    </div>
+                                                    <div class="col-6 text-center">
+                                                        <small class="text-muted">Benar: <?= $trainingCorrectDT ?></small>
+                                                    </div>
+                                                </div>
+                                                <small class="text-muted">Total data: <?= $trainingTotalCount ?> judul</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Testing Stats -->
+                                    <div class="col-md-6 mb-4">
+                                        <div class="card h-100 border-success">
+                                            <div class="card-header bg-success text-white">
+                                                <h6 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Data Testing</h6>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="row text-center">
+                                                    <div class="col-6">
+                                                        <h5 class="text-primary"><?= number_format($testingKnnAccuracy, 2) ?>%</h5>
+                                                        <small class="text-muted">KNN</small>
+                                                    </div>
+                                                    <div class="col-6">
+                                                        <h5 class="text-success"><?= number_format($testingDtAccuracy, 2) ?>%</h5>
+                                                        <small class="text-muted">Decision Tree</small>
+                                                    </div>
+                                                </div>
+                                                <hr>
+                                                <div class="row">
+                                                    <div class="col-6 text-center">
+                                                        <small class="text-muted">Benar: <?= $testingCorrectKNN ?></small>
+                                                    </div>
+                                                    <div class="col-6 text-center">
+                                                        <small class="text-muted">Benar: <?= $testingCorrectDT ?></small>
+                                                    </div>
+                                                </div>
+                                                <small class="text-muted">Total data: <?= $testingTotalCount ?> judul</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Chart Perbandingan Training vs Testing -->
+                                <div class="mt-4">
+                                    <h6 class="fw-bold mb-3">Grafik Perbandingan Akurasi</h6>
+                                    <?php if ($trainTestComparisonImg): ?>
+                                        <div class="img-container">
+                                            <img src="data:image/png;base64,<?php echo $trainTestComparisonImg; ?>" class="img-fluid" alt="Training vs Testing Comparison">
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="chart-container chart-small">
+                                            <canvas id="trainTestComparisonChart"></canvas>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Performa per Kategori -->
+                    <div class="section-card fade-in" style="animation-delay: 0.8s">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-bullseye fs-4 me-2 text-primary"></i>
+                                    <h5 class="mb-0">Performa Model per Kategori</h5>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <!-- Tabs untuk Training dan Testing -->
+                                <ul class="nav nav-tabs" id="categoryPerformanceTabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link active" id="training-category-tab" data-bs-toggle="tab" data-bs-target="#training-category" type="button" role="tab">
+                                            <i class="bi bi-mortarboard me-2"></i>Training Performance
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link" id="testing-category-tab" data-bs-toggle="tab" data-bs-target="#testing-category" type="button" role="tab">
+                                            <i class="bi bi-clipboard-check me-2"></i>Testing Performance
+                                        </button>
+                                    </li>
+                                </ul>
+                                
+                                <div class="tab-content" id="categoryPerformanceTabContent">
+                                    <!-- Training Category Performance -->
+                                    <div class="tab-pane fade show active" id="training-category" role="tabpanel">
+                                        <div class="row mt-4">
+                                            <?php foreach ($trainingCategoryStats as $category => $stats): ?>
+                                            <div class="col-md-6 col-lg-4 mb-3">
+                                                <div class="category-card">
+                                                    <div class="card-body">
+                                                        <h6 class="card-title text-primary"><?= $category ?></h6>
+                                                        <div class="row text-center">
+                                                            <div class="col-6">
+                                                                <div class="metric-value text-primary" style="font-size: 1.2rem;">
+                                                                    <?= $stats['total'] > 0 ? number_format(($stats['knn_correct'] / $stats['total']) * 100, 1) : 0 ?>%
+                                                                </div>
+                                                                <div class="metric-label">KNN</div>
+                                                                <small class="text-muted"><?= $stats['knn_correct'] ?>/<?= $stats['total'] ?></small>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="metric-value text-success" style="font-size: 1.2rem;">
+                                                                    <?= $stats['total'] > 0 ? number_format(($stats['dt_correct'] / $stats['total']) * 100, 1) : 0 ?>%
+                                                                </div>
+                                                                <div class="metric-label">DT</div>
+                                                                <small class="text-muted"><?= $stats['dt_correct'] ?>/<?= $stats['total'] ?></small>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Testing Category Performance -->
+                                    <div class="tab-pane fade" id="testing-category" role="tabpanel">
+                                        <div class="row mt-4">
+                                            <?php foreach ($testingCategoryStats as $category => $stats): ?>
+                                            <div class="col-md-6 col-lg-4 mb-3">
+                                                <div class="category-card">
+                                                    <div class="card-body">
+                                                        <h6 class="card-title text-primary"><?= $category ?></h6>
+                                                        <div class="row text-center">
+                                                            <div class="col-6">
+                                                                <div class="metric-value text-primary" style="font-size: 1.2rem;">
+                                                                    <?= $stats['total'] > 0 ? number_format(($stats['knn_correct'] / $stats['total']) * 100, 1) : 0 ?>%
+                                                                </div>
+                                                                <div class="metric-label">KNN</div>
+                                                                <small class="text-muted"><?= $stats['knn_correct'] ?>/<?= $stats['total'] ?></small>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <div class="metric-value text-success" style="font-size: 1.2rem;">
+                                                                    <?= $stats['total'] > 0 ? number_format(($stats['dt_correct'] / $stats['total']) * 100, 1) : 0 ?>%
+                                                                </div>
+                                                                <div class="metric-label">DT</div>
+                                                                <small class="text-muted"><?= $stats['dt_correct'] ?>/<?= $stats['total'] ?></small>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Perbandingan Akurasi KNN vs DT -->
+                    <div class="section-card fade-in" style="animation-delay: 0.9s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-body p-0">
                                 <div class="row g-4">
@@ -527,7 +946,7 @@ if ($dbStatus) {
                                             <div class="card-header bg-white">
                                                 <div class="d-flex align-items-center">
                                                     <i class="bi bi-bar-chart-line fs-4 me-2 text-primary"></i>
-                                                    <h5 class="mb-0">Perbandingan Akurasi</h5>
+                                                    <h5 class="mb-0">Perbandingan Akurasi Model</h5>
                                                 </div>
                                             </div>
                                             <div class="card-body">
@@ -546,7 +965,7 @@ if ($dbStatus) {
                                             <div class="card-header bg-white">
                                                 <div class="d-flex align-items-center">
                                                     <i class="bi bi-award fs-4 me-2 text-primary"></i>
-                                                    <h5 class="mb-0">Hasil Akurasi</h5>
+                                                    <h5 class="mb-0">Hasil Akurasi Testing</h5>
                                                 </div>
                                             </div>
                                             <div class="card-body">
@@ -554,31 +973,31 @@ if ($dbStatus) {
                                                     <div class="mb-4">
                                                         <div class="d-flex justify-content-between align-items-center mb-2">
                                                             <span class="fw-bold">KNN</span>
-                                                            <span id="knnAccuracy" class="badge bg-primary badge-large">0%</span>
+                                                            <span id="knnAccuracy" class="badge bg-primary badge-large"><?= number_format($testingKnnAccuracy, 1) ?>%</span>
                                                         </div>
                                                         <div class="progress" style="height: 10px;">
-                                                            <div id="knnProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                                                            <div id="knnProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: <?= $testingKnnAccuracy ?>%"></div>
                                                         </div>
                                                     </div>
                                                     <div class="mb-4">
                                                         <div class="d-flex justify-content-between align-items-center mb-2">
                                                             <span class="fw-bold">Decision Tree</span>
-                                                            <span id="dtAccuracy" class="badge bg-success badge-large">0%</span>
+                                                            <span id="dtAccuracy" class="badge bg-success badge-large"><?= number_format($testingDtAccuracy, 1) ?>%</span>
                                                         </div>
                                                         <div class="progress" style="height: 10px;">
-                                                            <div id="dtProgress" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%"></div>
+                                                            <div id="dtProgress" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: <?= $testingDtAccuracy ?>%"></div>
                                                         </div>
                                                     </div>
                                                 </div>
                                                 
                                                 <div class="mt-4">
                                                     <h6 class="text-muted fw-bold mb-3">Model Terbaik:</h6>
-                                                    <div class="alert alert-primary py-3">
+                                                    <div class="alert alert-<?= $testingKnnAccuracy > $testingDtAccuracy ? 'primary' : 'success' ?> py-3">
                                                         <div class="d-flex align-items-center">
                                                             <i class="bi bi-trophy-fill fs-4 me-3"></i>
                                                             <div>
-                                                                <strong id="bestModel" class="fs-5">-</strong>
-                                                                <div class="small">Akurasi tertinggi</div>
+                                                                <strong id="bestModel" class="fs-5"><?= $testingKnnAccuracy > $testingDtAccuracy ? 'KNN' : 'Decision Tree' ?></strong>
+                                                                <div class="small">Akurasi: <?= number_format(max($testingKnnAccuracy, $testingDtAccuracy), 2) ?>%</div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -592,7 +1011,7 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Model Detail Cards -->
-                    <div class="section-card fade-in" style="animation-delay: 0.7s">
+                    <div class="section-card fade-in" style="animation-delay: 1.0s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
@@ -606,7 +1025,6 @@ if ($dbStatus) {
                                     <div class="col-md-6 mb-4">
                                         <div class="card model-detail-card knn-border h-100">
                                             <div class="card-body position-relative">
-                                                <i class="bi bi-bullseye model-icon"></i>
                                                 <div class="d-flex align-items-center mb-3">
                                                     <div class="me-3 bg-primary bg-opacity-10 p-3 rounded-circle">
                                                         <i class="bi bi-bullseye fs-3 text-primary"></i>
@@ -633,11 +1051,21 @@ if ($dbStatus) {
                                                             <thead class="table-primary">
                                                                 <tr>
                                                                     <th>Metric</th>
-                                                                    <th>Score</th>
+                                                                    <th>Training</th>
+                                                                    <th>Testing</th>
                                                                 </tr>
                                                             </thead>
-                                                            <tbody id="knnMetricsTableBody">
-                                                                <!-- KNN metrics will be inserted here -->
+                                                            <tbody>
+                                                                <tr>
+                                                                    <td>Accuracy</td>
+                                                                    <td><?= number_format($trainingKnnAccuracy, 2) ?>%</td>
+                                                                    <td><?= number_format($testingKnnAccuracy, 2) ?>%</td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>Correct Predictions</td>
+                                                                    <td><?= $trainingCorrectKNN ?>/<?= $trainingTotalCount ?></td>
+                                                                    <td><?= $testingCorrectKNN ?>/<?= $testingTotalCount ?></td>
+                                                                </tr>
                                                             </tbody>
                                                         </table>
                                                     </div>
@@ -650,7 +1078,6 @@ if ($dbStatus) {
                                     <div class="col-md-6 mb-4">
                                         <div class="card model-detail-card dt-border h-100">
                                             <div class="card-body position-relative">
-                                                <i class="bi bi-diagram-3 model-icon"></i>
                                                 <div class="d-flex align-items-center mb-3">
                                                     <div class="me-3 bg-success bg-opacity-10 p-3 rounded-circle">
                                                         <i class="bi bi-diagram-3 fs-3 text-success"></i>
@@ -664,11 +1091,7 @@ if ($dbStatus) {
                                                     <div class="d-flex gap-2 mt-3 mb-2 flex-wrap">
                                                         <span class="badge bg-success-subtle text-success metric-pill">
                                                             <i class="bi bi-tree me-1"></i>
-                                                            Depth: <span id="dtDepth">0</span>
-                                                        </span>
-                                                        <span class="badge bg-success-subtle text-success metric-pill">
-                                                            <i class="bi bi-journal me-1"></i>
-                                                            Leaves: <span id="dtLeaves">0</span>
+                                                            Max Depth: <span id="dtDepth">Auto</span>
                                                         </span>
                                                         <span class="badge bg-secondary metric-pill">
                                                             <i class="bi bi-calculator me-1"></i>
@@ -681,11 +1104,21 @@ if ($dbStatus) {
                                                             <thead class="table-success">
                                                                 <tr>
                                                                     <th>Metric</th>
-                                                                    <th>Score</th>
+                                                                    <th>Training</th>
+                                                                    <th>Testing</th>
                                                                 </tr>
                                                             </thead>
-                                                            <tbody id="dtMetricsTableBody">
-                                                                <!-- DT metrics will be inserted here -->
+                                                            <tbody>
+                                                                <tr>
+                                                                    <td>Accuracy</td>
+                                                                    <td><?= number_format($trainingDtAccuracy, 2) ?>%</td>
+                                                                    <td><?= number_format($testingDtAccuracy, 2) ?>%</td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>Correct Predictions</td>
+                                                                    <td><?= $trainingCorrectDT ?>/<?= $trainingTotalCount ?></td>
+                                                                    <td><?= $testingCorrectDT ?>/<?= $testingTotalCount ?></td>
+                                                                </tr>
                                                             </tbody>
                                                         </table>
                                                     </div>
@@ -699,7 +1132,7 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Confusion Matrix Section -->
-                    <div class="section-card fade-in" style="animation-delay: 0.8s">
+                    <div class="section-card fade-in" style="animation-delay: 1.1s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
@@ -747,6 +1180,16 @@ if ($dbStatus) {
                                     </div>
                                 </div>
                                 
+                                <?php if ($combinedCmImg): ?>
+                                <!-- Combined Confusion Matrix -->
+                                <div class="mt-4">
+                                    <h6 class="fw-bold mb-3">Perbandingan Confusion Matrix (Training vs Testing)</h6>
+                                    <div class="img-container">
+                                        <img src="data:image/png;base64,<?php echo $combinedCmImg; ?>" class="img-fluid" alt="Combined Confusion Matrix">
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                                
                                 <div class="alert alert-info mt-3">
                                     <div class="d-flex">
                                         <i class="bi bi-info-circle-fill fs-4 me-3"></i>
@@ -773,7 +1216,7 @@ if ($dbStatus) {
 
                     <?php if ($performanceComparisonImg): ?>
                     <!-- Performance Comparison Section -->
-                    <div class="section-card fade-in" style="animation-delay: 0.9s">
+                    <div class="section-card fade-in" style="animation-delay: 1.2s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
@@ -791,8 +1234,8 @@ if ($dbStatus) {
                     </div>
                     <?php endif; ?>
                     
-                    <!-- Hasil Detail -->
-                    <div class="section-card fade-in" style="animation-delay: 0.9s">
+                    <!-- Hasil Detail dengan Tabs -->
+                    <div class="section-card fade-in" style="animation-delay: 1.3s">
                         <div class="card border-0 shadow-sm">
                             <div class="card-header bg-white">
                                 <div class="d-flex align-items-center">
@@ -801,46 +1244,113 @@ if ($dbStatus) {
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="row mb-4">
-                                    <div class="col-md-6 mb-3 mb-md-0">
-                                        <div class="input-group">
-                                            <span class="input-group-text"><i class="bi bi-search"></i></span>
-                                            <input type="text" id="tableSearch" class="form-control" placeholder="Cari judul skripsi...">
+                                <!-- Tabs Navigation -->
+                                <ul class="nav nav-tabs" id="dataTypeTabs" role="tablist">
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link active" id="training-tab" data-bs-toggle="tab" data-bs-target="#training" type="button" role="tab" aria-controls="training" aria-selected="true">
+                                            <i class="bi bi-mortarboard me-2"></i>Data Training (<?= $trainingTotalCount ?>)
+                                        </button>
+                                    </li>
+                                    <li class="nav-item" role="presentation">
+                                        <button class="nav-link" id="testing-tab" data-bs-toggle="tab" data-bs-target="#testing" type="button" role="tab" aria-controls="testing" aria-selected="false">
+                                            <i class="bi bi-clipboard-check me-2"></i>Data Testing (<?= $testingTotalCount ?>)
+                                        </button>
+                                    </li>
+                                </ul>
+                                
+                                <!-- Tab Content -->
+                                <div class="tab-content" id="dataTypeTabContent">
+                                    <!-- Training Data Tab -->
+                                    <div class="tab-pane fade show active" id="training" role="tabpanel" aria-labelledby="training-tab">
+                                        <div class="row mb-4">
+                                            <div class="col-md-6 mb-3 mb-md-0">
+                                                <div class="input-group">
+                                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                                    <input type="text" id="trainingTableSearch" class="form-control" placeholder="Cari judul skripsi di data training...">
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6 text-md-end">
+                                                <div class="btn-group" role="group">
+                                                    <button type="button" class="btn btn-outline-primary training-filter-btn active" data-filter="all">Semua</button>
+                                                    <button type="button" class="btn btn-outline-success training-filter-btn" data-filter="correct">Benar</button>
+                                                    <button type="button" class="btn btn-outline-danger training-filter-btn" data-filter="incorrect">Salah</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="table-responsive">
+                                            <table class="table table-hover results-table" id="trainingResultsTable">
+                                                <thead>
+                                                    <tr>
+                                                        <th width="5%" class="text-center">No</th>
+                                                        <th width="40%">Judul Skripsi</th>
+                                                        <th width="15%" class="text-center">Label Sebenarnya</th>
+                                                        <th width="15%" class="text-center">Prediksi KNN</th>
+                                                        <th width="15%" class="text-center">Prediksi DT</th>
+                                                        <th width="10%" class="text-center">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="trainingResultsTableBody">
+                                                    <!-- Training results akan ditampilkan di sini -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        
+                                        <div id="noTrainingResultsMessage" style="display: none;" class="alert alert-warning mt-3">
+                                            <div class="d-flex align-items-center">
+                                                <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
+                                                <div>
+                                                    <strong>Tidak ada hasil</strong><br>
+                                                    <span>Tidak ada hasil training yang sesuai dengan pencarian.</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-6 text-md-end">
-                                        <div class="btn-group" role="group">
-                                            <button type="button" class="btn btn-outline-primary filter-btn active" data-filter="all">Semua</button>
-                                            <button type="button" class="btn btn-outline-success filter-btn" data-filter="correct">Benar</button>
-                                            <button type="button" class="btn btn-outline-danger filter-btn" data-filter="incorrect">Salah</button>
+                                    
+                                    <!-- Testing Data Tab -->
+                                    <div class="tab-pane fade" id="testing" role="tabpanel" aria-labelledby="testing-tab">
+                                        <div class="row mb-4">
+                                            <div class="col-md-6 mb-3 mb-md-0">
+                                                <div class="input-group">
+                                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                                    <input type="text" id="testingTableSearch" class="form-control" placeholder="Cari judul skripsi di data testing...">
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6 text-md-end">
+                                                <div class="btn-group" role="group">
+                                                    <button type="button" class="btn btn-outline-primary testing-filter-btn active" data-filter="all">Semua</button>
+                                                    <button type="button" class="btn btn-outline-success testing-filter-btn" data-filter="correct">Benar</button>
+                                                    <button type="button" class="btn btn-outline-danger testing-filter-btn" data-filter="incorrect">Salah</button>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="table-responsive">
-                                    <table class="table table-hover results-table" id="resultsTable">
-                                        <thead>
-                                            <tr>
-                                                <th width="5%" class="text-center">No</th>
-                                                <th width="45%">Judul Skripsi</th>
-                                                <th width="15%" class="text-center">Label Sebenarnya</th>
-                                                <th width="15%" class="text-center">Prediksi KNN</th>
-                                                <th width="15%" class="text-center">Prediksi DT</th>
-                                                <th width="5%" class="text-center">Detail</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="resultsTableBody">
-                                            <!-- Hasil prediksi akan ditampilkan di sini -->
-                                        </tbody>
-                                    </table>
-                                </div>
-                                
-                                <div id="noResultsMessage" style="display: none;" class="alert alert-warning mt-3">
-                                    <div class="d-flex align-items-center">
-                                        <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
-                                        <div>
-                                            <strong>Tidak ada hasil</strong><br>
-                                            <span>Tidak ada hasil yang sesuai dengan pencarian.</span>
+                                        
+                                        <div class="table-responsive">
+                                            <table class="table table-hover results-table" id="testingResultsTable">
+                                                <thead>
+                                                    <tr>
+                                                        <th width="5%" class="text-center">No</th>
+                                                        <th width="40%">Judul Skripsi</th>
+                                                        <th width="15%" class="text-center">Label Sebenarnya</th>
+                                                        <th width="15%" class="text-center">Prediksi KNN</th>
+                                                        <th width="15%" class="text-center">Prediksi DT</th>
+                                                        <th width="10%" class="text-center">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="testingResultsTableBody">
+                                                    <!-- Testing results akan ditampilkan di sini -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        
+                                        <div id="noTestingResultsMessage" style="display: none;" class="alert alert-warning mt-3">
+                                            <div class="d-flex align-items-center">
+                                                <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
+                                                <div>
+                                                    <strong>Tidak ada hasil</strong><br>
+                                                    <span>Tidak ada hasil testing yang sesuai dengan pencarian.</span>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -849,7 +1359,7 @@ if ($dbStatus) {
                     </div>
                     
                     <!-- Navigation Buttons -->
-                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 1.0s">
+                    <div class="d-flex justify-content-between mt-4 fade-in" style="animation-delay: 1.4s">
                         <a href="index.php" class="btn btn-outline-secondary">
                             <i class="bi bi-arrow-left me-1"></i> Kembali ke Upload
                         </a>
@@ -866,7 +1376,7 @@ if ($dbStatus) {
                 </div>
             </div>
         </div>
-       
+        
         <!-- Form Prediksi Judul Baru -->
         <div id="predictionForm" class="card fade-in">
             <div class="card-header">
@@ -1028,539 +1538,456 @@ if ($dbStatus) {
    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Ambil data dari PHP
-            const databaseResults = <?= json_encode($results) ?>;
-            const knnAccuracy = <?= json_encode($knnAccuracy) ?>;
-            const dtAccuracy = <?= json_encode($dtAccuracy) ?>;
-            
-            // Animasi elemen saat halaman dimuat
-            const animatedElements = document.querySelectorAll('.fade-in');
-            animatedElements.forEach((element, index) => {
-                element.style.animationDelay = (index * 0.1) + 's';
-            });
-            
-            // Cek status API
-            const apiStatusEl = document.getElementById('apiStatus');
-            checkApiStatus();
-            
-            function checkApiStatus() {
-                fetch('<?php echo API_URL; ?>/template', { 
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' },
-                    // Timeout 5 detik
-                    signal: AbortSignal.timeout(5000)
-                })
-                .then(response => {
-                    if (response.ok) {
-                        apiStatusEl.innerHTML = '<i class="bi bi-circle-fill text-success me-1" style="font-size: 0.5rem;"></i> API Connected';
-                        apiStatusEl.classList.replace('text-dark', 'text-success');
-                    } else {
-                        throw new Error('API response not OK');
+// Perbaikan untuk script JavaScript di result.php
+document.addEventListener('DOMContentLoaded', function() {
+    // Ambil data dari PHP dengan validasi
+    const trainingResults = <?= json_encode($trainingResults) ?> || [];
+    const testingResults = <?= json_encode($testingResults) ?> || [];
+    const trainingKnnAccuracy = <?= json_encode($trainingKnnAccuracy) ?> || 0;
+    const trainingDtAccuracy = <?= json_encode($trainingDtAccuracy) ?> || 0;
+    const testingKnnAccuracy = <?= json_encode($testingKnnAccuracy) ?> || 0;
+    const testingDtAccuracy = <?= json_encode($testingDtAccuracy) ?> || 0;
+    const trainingCategoryStats = <?= json_encode($trainingCategoryStats) ?> || {};
+    const testingCategoryStats = <?= json_encode($testingCategoryStats) ?> || {};
+    
+    // Perbaikan untuk allCategories - pastikan berupa array
+    let allCategories = <?= json_encode($allCategories) ?> || [];
+    
+    // Validasi dan normalisasi allCategories
+    if (!Array.isArray(allCategories)) {
+        console.warn('allCategories is not an array, converting...');
+        if (typeof allCategories === 'object' && allCategories !== null) {
+            allCategories = Object.keys(allCategories);
+        } else {
+            allCategories = [];
+        }
+    }
+    
+    // Jika allCategories masih kosong, buat dari data yang ada
+    if (allCategories.length === 0) {
+        const categoriesSet = new Set();
+        
+        // Ambil kategori dari training results
+        trainingResults.forEach(row => {
+            if (row.actual) categoriesSet.add(row.actual);
+        });
+        
+        // Ambil kategori dari testing results
+        testingResults.forEach(row => {
+            if (row.actual) categoriesSet.add(row.actual);
+        });
+        
+        allCategories = Array.from(categoriesSet);
+    }
+    
+    console.log('Categories found:', allCategories);
+    
+    // Buat chart distribusi kategori
+    function createCategoryDistributionChart() {
+        const ctx = document.getElementById('categoryDistributionChart');
+        if (!ctx) {
+            console.log('categoryDistributionChart canvas not found');
+            return;
+        }
+        
+        // Validasi allCategories sebelum forEach
+        if (!Array.isArray(allCategories) || allCategories.length === 0) {
+            console.warn('No categories available for chart');
+            // Tampilkan pesan di canvas
+            const canvasContainer = ctx.parentElement;
+            canvasContainer.innerHTML = '<div class="alert alert-warning">Tidak ada data kategori untuk ditampilkan</div>';
+            return;
+        }
+        
+        // Hitung distribusi kategori
+        const categoryData = {};
+        allCategories.forEach(category => {
+            const trainingCount = trainingCategoryStats[category] ? trainingCategoryStats[category].total : 0;
+            const testingCount = testingCategoryStats[category] ? testingCategoryStats[category].total : 0;
+            categoryData[category] = {
+                training: trainingCount,
+                testing: testingCount,
+                total: trainingCount + testingCount
+            };
+        });
+        
+        try {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: allCategories,
+                    datasets: [{
+                        label: 'Training',
+                        data: allCategories.map(cat => categoryData[cat].training),
+                        backgroundColor: 'rgba(67, 97, 238, 0.8)',
+                        borderColor: 'rgba(67, 97, 238, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Testing',
+                        data: allCategories.map(cat => categoryData[cat].testing),
+                        backgroundColor: 'rgba(76, 201, 240, 0.8)',
+                        borderColor: 'rgba(76, 201, 240, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Distribusi Data per Kategori'
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
                     }
-                })
-                .catch(error => {
-                    apiStatusEl.innerHTML = '<i class="bi bi-circle-fill text-danger me-1" style="font-size: 0.5rem;"></i> API Disconnected';
-                    apiStatusEl.classList.replace('text-dark', 'text-danger');
-                    console.error('API Status Check Error:', error);
-                });
+                }
+            });
+        } catch (error) {
+            console.error('Error creating category distribution chart:', error);
+            const canvasContainer = ctx.parentElement;
+            canvasContainer.innerHTML = '<div class="alert alert-danger">Gagal membuat grafik distribusi kategori</div>';
+        }
+    }
+    
+    // Buat chart perbandingan training vs testing
+    function createTrainTestComparisonChart() {
+        const ctx = document.getElementById('trainTestComparisonChart');
+        if (!ctx) {
+            console.log('trainTestComparisonChart canvas not found');
+            return;
+        }
+        
+        try {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['KNN', 'Decision Tree'],
+                    datasets: [{
+                        label: 'Training Accuracy (%)',
+                        data: [trainingKnnAccuracy, trainingDtAccuracy],
+                        backgroundColor: 'rgba(67, 97, 238, 0.8)',
+                        borderColor: 'rgba(67, 97, 238, 1)',
+                        borderWidth: 2
+                    }, {
+                        label: 'Testing Accuracy (%)',
+                        data: [testingKnnAccuracy, testingDtAccuracy],
+                        backgroundColor: 'rgba(40, 167, 69, 0.8)',
+                        borderColor: 'rgba(40, 167, 69, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Perbandingan Akurasi Training vs Testing'
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error creating train test comparison chart:', error);
+            const canvasContainer = ctx.parentElement;
+            canvasContainer.innerHTML = '<div class="alert alert-danger">Gagal membuat grafik perbandingan training vs testing</div>';
+        }
+    }
+    
+    // Buat chart akurasi jika tidak ada gambar
+    function createAccuracyChart() {
+        const ctx = document.getElementById('accuracyChart');
+        if (!ctx) {
+            console.log('accuracyChart canvas not found');
+            return;
+        }
+        
+        try {
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['KNN', 'Decision Tree'],
+                    datasets: [{
+                        data: [testingKnnAccuracy, testingDtAccuracy],
+                        backgroundColor: [
+                            'rgba(67, 97, 238, 0.8)',
+                            'rgba(40, 167, 69, 0.8)'
+                        ],
+                        borderColor: [
+                            'rgba(67, 97, 238, 1)',
+                            'rgba(40, 167, 69, 1)'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Akurasi Testing (%)'
+                        },
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error creating accuracy chart:', error);
+            const canvasContainer = ctx.parentElement;
+            canvasContainer.innerHTML = '<div class="alert alert-danger">Gagal membuat grafik akurasi</div>';
+        }
+    }
+    
+    // Fungsi untuk populate table
+    function populateTable(results, tableBodyId, tableId, filterClass, searchId, noResultsId) {
+        const tableBody = document.getElementById(tableBodyId);
+        if (!tableBody) {
+            console.log(`Table body ${tableBodyId} not found`);
+            return;
+        }
+        
+        if (!Array.isArray(results) || results.length === 0) {
+            console.log(`No results for ${tableBodyId}`);
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Tidak ada data</td></tr>';
+            return;
+        }
+        
+        tableBody.innerHTML = '';
+        
+        results.forEach((row, index) => {
+            if (!row.actual || !row.knn_pred || !row.dt_pred) {
+                console.warn('Invalid row data:', row);
+                return;
             }
             
-            if (databaseResults && databaseResults.length > 0) {
-                // Tampilkan data dari database
-                document.getElementById('results').style.display = 'block';
-                document.getElementById('noData').style.display = 'none';
+            const correctKNN = row.actual === row.knn_pred;
+            const correctDT = row.actual === row.dt_pred;
+            
+            const tr = document.createElement('tr');
+            tr.dataset.title = row.title || '';
+            tr.dataset.actual = row.actual || '';
+            tr.dataset.knn = row.knn_pred || '';
+            tr.dataset.dt = row.dt_pred || '';
+            
+            // Determine overall correctness
+            const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
+            
+            tr.dataset.correct = (correctCount === 2) ? 'all' : 
+                                (correctCount > 0) ? 'partial' : 'none';
+            
+            if (correctCount === 2) {
+                tr.classList.add('table-success');
+            } else if (correctCount === 0) {
+                tr.classList.add('table-danger');
+            }
+            
+            const knnClass = correctKNN ? 'bg-success' : 'bg-danger';
+            const dtClass = correctDT ? 'bg-success' : 'bg-danger';
+            
+            // Status badge
+            let statusBadge = '';
+            if (correctCount === 2) {
+                statusBadge = '<span class="badge bg-success">Semua Benar</span>';
+            } else if (correctCount === 1) {
+                statusBadge = '<span class="badge bg-warning">Sebagian Benar</span>';
+            } else {
+                statusBadge = '<span class="badge bg-danger">Semua Salah</span>';
+            }
+            
+            tr.innerHTML = `
+                <td class="text-center">${index + 1}</td>
+                <td>${row.title || 'N/A'}</td>
+                <td class="text-center"><span class="badge bg-secondary rounded-pill">${row.actual || 'N/A'}</span></td>
+                <td class="text-center"><span class="badge ${knnClass} rounded-pill">${row.knn_pred || 'N/A'}</span></td>
+                <td class="text-center"><span class="badge ${dtClass} rounded-pill">${row.dt_pred || 'N/A'}</span></td>
+                <td class="text-center">${statusBadge}</td>
+            `;
+            
+            tableBody.appendChild(tr);
+        });
+        
+        // Setup filter dan search untuk tabel ini
+        setupTableControls(tableBodyId, filterClass, searchId, noResultsId);
+    }
+    
+    // Fungsi untuk setup kontrol filter dan search
+    function setupTableControls(tableBodyId, filterClass, searchId, noResultsId) {
+        const filterButtons = document.querySelectorAll(`.${filterClass}`);
+        const searchInput = document.getElementById(searchId);
+        const tableBody = document.getElementById(tableBodyId);
+        
+        if (!tableBody) return;
+        
+        // Fungsi untuk filter dan pencarian
+        function filterTable() {
+            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+            const activeFilter = document.querySelector(`.${filterClass}.active`)?.dataset.filter || 'all';
+            let visibleCount = 0;
+            
+            Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
+                if (!row.dataset.title) return; // Skip rows without data
                 
-                // Tampilkan akurasi
-                document.getElementById('knnAccuracy').textContent = knnAccuracy.toFixed(2) + '%';
-                document.getElementById('dtAccuracy').textContent = dtAccuracy.toFixed(2) + '%';
+                const title = row.dataset.title.toLowerCase();
+                const correct = row.dataset.correct;
                 
-                // Update progress bars
-                setTimeout(() => {
-                    document.getElementById('knnProgress').style.width = knnAccuracy + '%';
-                    document.getElementById('dtProgress').style.width = dtAccuracy + '%';
-                }, 500);
+                // Filter berdasarkan teks
+                const matchesSearch = title.includes(searchTerm);
                 
-                // Tentukan model terbaik
-                if (knnAccuracy >= dtAccuracy) {
-                    document.getElementById('bestModel').textContent = 'KNN (' + knnAccuracy.toFixed(2) + '%)';
+                // Filter berdasarkan status (benar/salah)
+                const matchesFilter = 
+                    activeFilter === 'all' || 
+                    (activeFilter === 'correct' && correct === 'all') ||
+                    (activeFilter === 'incorrect' && correct !== 'all');
+                
+                if (matchesSearch && matchesFilter) {
+                    row.style.display = '';
+                    visibleCount++;
                 } else {
-                    document.getElementById('bestModel').textContent = 'Decision Tree (' + dtAccuracy.toFixed(2) + '%)';
+                    row.style.display = 'none';
                 }
+            });
+            
+            // Tampilkan pesan jika tidak ada hasil
+            const noResultsElement = document.getElementById(noResultsId);
+            if (noResultsElement) {
+                noResultsElement.style.display = visibleCount > 0 ? 'none' : 'block';
+            }
+        }
+        
+        // Aktifkan filter buttons
+        filterButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                // Reset semua button di grup ini
+                filterButtons.forEach(btn => btn.classList.remove('active'));
                 
-                // Tampilkan grafik akurasi menggunakan Chart.js jika tidak ada image dari database
-                <?php if (!$accuracyImg): ?>
-                const ctx = document.getElementById('accuracyChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: ['KNN', 'Decision Tree'],
-                        datasets: [{
-                            label: 'Akurasi (%)',
-                            data: [knnAccuracy, dtAccuracy],
-                            backgroundColor: [
-                                'rgba(67, 97, 238, 0.7)',
-                                'rgba(25, 135, 84, 0.7)'
-                            ],
-                            borderColor: [
-                                'rgba(67, 97, 238, 1)',
-                                'rgba(25, 135, 84, 1)'
-                            ],
-                            borderWidth: 1,
-                            borderRadius: 6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        animation: {
-                            duration: 2000,
-                            easing: 'easeOutQuart'
-                        },
-                        plugins: {
-                            legend: {
-                                display: false
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        return context.raw.toFixed(2) + '%';
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                max: 100,
-                                ticks: {
-                                    callback: function(value) {
-                                        return value + '%';
-                                    }
-                                }
-                            },
-                            x: {
-                                grid: {
-                                    display: false
-                                }
-                            }
-                        }
-                    }
-                });
-                <?php endif; ?>
+                // Aktifkan button yang diklik
+                this.classList.add('active');
                 
-                // Hitung metrik precision, recall, dan F1 score untuk KNN
-                const knnMetricsTable = document.getElementById('knnMetricsTableBody');
-                knnMetricsTable.innerHTML = '';
-                
-                // Hitung untuk setiap kategori
-                const categories = [...new Set(databaseResults.map(r => r.actual))];
-                
-                // Hitung confusion matrix dan metrik turunannya
-                let knnTruePositives = {}, knnFalsePositives = {}, knnFalseNegatives = {}, knnTrueNegatives = {};
-                
-                // Inisialisasi perhitungan untuk setiap kategori
-                categories.forEach(category => {
-                    knnTruePositives[category] = 0;
-                    knnFalsePositives[category] = 0;
-                    knnFalseNegatives[category] = 0;
-                    knnTrueNegatives[category] = 0;
-                });
-                
-                // Hitung confusion matrix
-                databaseResults.forEach(row => {
-                    categories.forEach(category => {
-                        if (row.actual === category && row.knn_pred === category) {
-                            knnTruePositives[category]++;
-                        } else if (row.actual !== category && row.knn_pred === category) {
-                            knnFalsePositives[category]++;
-                        } else if (row.actual === category && row.knn_pred !== category) {
-                            knnFalseNegatives[category]++;
-                        } else if (row.actual !== category && row.knn_pred !== category) {
-                            knnTrueNegatives[category]++;
-                        }
-                    });
-                });
-                
-                // Hitung metrik
-                let totalKnnPrecision = 0, totalKnnRecall = 0, totalKnnF1 = 0;
-                let weightedKnnPrecision = 0, weightedKnnRecall = 0, weightedKnnF1 = 0;
-                let totalSamples = databaseResults.length;
-                
-                categories.forEach(category => {
-                    const tp = knnTruePositives[category];
-                    const fp = knnFalsePositives[category];
-                    const fn = knnFalseNegatives[category];
-                    const precision = tp / (tp + fp) || 0;
-                    const recall = tp / (tp + fn) || 0;
-                    const f1 = 2 * (precision * recall) / (precision + recall) || 0;
-                    
-                    const categoryCount = databaseResults.filter(r => r.actual === category).length;
-                    const weight = categoryCount / totalSamples;
-                    
-                    weightedKnnPrecision += precision * weight;
-                    weightedKnnRecall += recall * weight;
-                    weightedKnnF1 += f1 * weight;
-                    
-                    totalKnnPrecision += precision;
-                    totalKnnRecall += recall;
-                    totalKnnF1 += f1;
-                });
-                
-                // Rata-rata metrik (macro)
-                const macroKnnPrecision = totalKnnPrecision / categories.length;
-                const macroKnnRecall = totalKnnRecall / categories.length;
-                const macroKnnF1 = totalKnnF1 / categories.length;
-                
-                // Tampilkan metrik KNN
-                knnMetricsTable.innerHTML += `
-                    <tr>
-                        <td>Accuracy</td>
-                        <td>${knnAccuracy.toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>Precision (weighted)</td>
-                        <td>${(weightedKnnPrecision * 100).toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>Recall (weighted)</td>
-                        <td>${(weightedKnnRecall * 100).toFixed(2)}%</td>
-                    </tr>
-                    <tr>
-                        <td>F1-Score (weighted)</td>
-                        <td>${(weightedKnnF1 * 100).toFixed(2)}%</td>
-                    </tr>
-                `;
-                
-                // Hitung metrik precision, recall, dan F1 score untuk Decision Tree
-                const dtMetricsTable = document.getElementById('dtMetricsTableBody');
-                dtMetricsTable.innerHTML = '';
-                
-                // Hitung confusion matrix dan metrik turunannya
-                let dtTruePositives = {}, dtFalsePositives = {}, dtFalseNegatives = {}, dtTrueNegatives = {};
-                
-                // Inisialisasi perhitungan untuk setiap kategori
-                categories.forEach(category => {
-                    dtTruePositives[category] = 0;
-                    dtFalsePositives[category] = 0;
-                    dtFalseNegatives[category] = 0;
-                    dtTrueNegatives[category] = 0;
-                });
-                
-                // Hitung confusion matrix
-               databaseResults.forEach(row => {
-                   categories.forEach(category => {
-                       if (row.actual === category && row.dt_pred === category) {
-                           dtTruePositives[category]++;
-                       } else if (row.actual !== category && row.dt_pred === category) {
-                           dtFalsePositives[category]++;
-                       } else if (row.actual === category && row.dt_pred !== category) {
-                           dtFalseNegatives[category]++;
-                       } else if (row.actual !== category && row.dt_pred !== category) {
-                           dtTrueNegatives[category]++;
-                       }
-                   });
-               });
-               
-               // Hitung metrik
-               let totalDtPrecision = 0, totalDtRecall = 0, totalDtF1 = 0;
-               let weightedDtPrecision = 0, weightedDtRecall = 0, weightedDtF1 = 0;
-               
-               categories.forEach(category => {
-                   const tp = dtTruePositives[category];
-                   const fp = dtFalsePositives[category];
-                   const fn = dtFalseNegatives[category];
-                   const precision = tp / (tp + fp) || 0;
-                   const recall = tp / (tp + fn) || 0;
-                   const f1 = 2 * (precision * recall) / (precision + recall) || 0;
-                   
-                   const categoryCount = databaseResults.filter(r => r.actual === category).length;
-                   const weight = categoryCount / totalSamples;
-                   
-                   weightedDtPrecision += precision * weight;
-                   weightedDtRecall += recall * weight;
-                   weightedDtF1 += f1 * weight;
-                   
-                   totalDtPrecision += precision;
-                   totalDtRecall += recall;
-                   totalDtF1 += f1;
-               });
-               
-               // Rata-rata metrik (macro)
-               const macroDtPrecision = totalDtPrecision / categories.length;
-               const macroDtRecall = totalDtRecall / categories.length;
-               const macroDtF1 = totalDtF1 / categories.length;
-               
-               // Tampilkan metrik Decision Tree
-               dtMetricsTable.innerHTML += `
-                   <tr>
-                       <td>Accuracy</td>
-                       <td>${dtAccuracy.toFixed(2)}%</td>
-                   </tr>
-                   <tr>
-                       <td>Precision (weighted)</td>
-                       <td>${(weightedDtPrecision * 100).toFixed(2)}%</td>
-                   </tr>
-                   <tr>
-                       <td>Recall (weighted)</td>
-                       <td>${(weightedDtRecall * 100).toFixed(2)}%</td>
-                   </tr>
-                   <tr>
-                       <td>F1-Score (weighted)</td>
-                       <td>${(weightedDtF1 * 100).toFixed(2)}%</td>
-                   </tr>
-               `;
-               
-               // Default values for tree parameters
-               document.getElementById('dtDepth').textContent = "5";
-               document.getElementById('dtLeaves').textContent = "10";
-               
-               // Tampilkan tabel hasil
-               const tableBody = document.getElementById('resultsTableBody');
-               tableBody.innerHTML = '';
-               
-               databaseResults.forEach((row, index) => {
-                   const correctKNN = row.actual === row.knn_pred;
-                   const correctDT = row.actual === row.dt_pred;
-                   
-                   const tr = document.createElement('tr');
-                   tr.dataset.title = row.title;
-                   tr.dataset.actual = row.actual;
-                   tr.dataset.knn = row.knn_pred;
-                   tr.dataset.dt = row.dt_pred;
-                   
-                   // Determine overall correctness
-                   const correctCount = (correctKNN ? 1 : 0) + (correctDT ? 1 : 0);
-                   
-                   tr.dataset.correct = (correctCount === 2) ? 'all' : 
-                                       (correctCount > 0) ? 'partial' : 'none';
-                   
-                   if (correctCount === 2) {
-                       tr.classList.add('table-success');
-                   } else if (correctCount === 0) {
-                       tr.classList.add('table-danger');
-                   }
-                   
-                   const knnClass = correctKNN ? 'bg-success' : 'bg-danger';
-                   const dtClass = correctDT ? 'bg-success' : 'bg-danger';
-                   
-                   tr.innerHTML = `
-                       <td class="text-center">${index + 1}</td>
-                       <td>${row.title}</td>
-                       <td class="text-center"><span class="badge bg-secondary rounded-pill">${row.actual}</span></td>
-                       <td class="text-center"><span class="badge ${knnClass} rounded-pill">${row.knn_pred}</span></td>
-                       <td class="text-center"><span class="badge ${dtClass} rounded-pill">${row.dt_pred}</span></td>
-                       <td class="text-center">
-                           <button class="btn btn-sm btn-primary detail-btn" data-bs-toggle="modal" data-bs-target="#detailModal" 
-                               data-index="${index}">
-                               <i class="bi bi-info-circle"></i>
-                           </button>
-                       </td>
-                   `;
-                   
-                   tableBody.appendChild(tr);
-               });
-               
-               // Tambahkan hover effect
-               const tableRows = document.querySelectorAll('#resultsTableBody tr');
-               tableRows.forEach(row => {
-                   row.addEventListener('mouseenter', function() {
-                       this.classList.add('highlight-row');
-                   });
-                   row.addEventListener('mouseleave', function() {
-                       this.classList.remove('highlight-row');
-                   });
-               });
-               
-               // Event handler untuk filter dan pencarian
-               const filterButtons = document.querySelectorAll('.filter-btn');
-               const searchInput = document.getElementById('tableSearch');
-               
-               // Fungsi untuk filter dan pencarian
-               function filterTable() {
-                   const searchTerm = searchInput.value.toLowerCase();
-                   const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
-                   let visibleCount = 0;
-                   
-                   Array.from(tableBody.getElementsByTagName('tr')).forEach(row => {
-                       const title = row.dataset.title.toLowerCase();
-                       const correct = row.dataset.correct;
-                       
-                       // Filter berdasarkan teks
-                       const matchesSearch = title.includes(searchTerm);
-                       
-                       // Filter berdasarkan status (benar/salah)
-                       const matchesFilter = 
-                           activeFilter === 'all' || 
-                           (activeFilter === 'correct' && correct === 'all') ||
-                           (activeFilter === 'incorrect' && correct !== 'all');
-                       
-                       if (matchesSearch && matchesFilter) {
-                           row.style.display = '';
-                           visibleCount++;
-                       } else {
-                           row.style.display = 'none';
-                       }
-                   });
-                   
-                   // Tampilkan pesan jika tidak ada hasil
-                   document.getElementById('noResultsMessage').style.display = visibleCount > 0 ? 'none' : 'block';
-               }
-               
-               // Aktifkan filter buttons
-               filterButtons.forEach(button => {
-                   button.addEventListener('click', function() {
-                       // Reset semua button
-                       filterButtons.forEach(btn => btn.classList.remove('active'));
-                       
-                       // Aktifkan button yang diklik
-                       this.classList.add('active');
-                       
-                       // Filter tabel
-                       filterTable();
-                   });
-               });
-               
-               // Aktifkan pencarian
-               if (searchInput) {
-                   searchInput.addEventListener('input', filterTable);
-               }
-               
-               // Aktifkan handler untuk tombol detail
-               const detailButtons = document.querySelectorAll('.detail-btn');
-               detailButtons.forEach(button => {
-                   button.addEventListener('click', function() {
-                       const index = this.dataset.index;
-                       const row = databaseResults[index];
-                       
-                       document.getElementById('modalTitle').textContent = row.title;
-                       document.getElementById('modalCategory').textContent = row.actual;
-                       document.getElementById('modalActual').textContent = row.actual;
-                       document.getElementById('modalKNN').textContent = row.knn_pred;
-                       document.getElementById('modalDT').textContent = row.dt_pred;
-                       document.getElementById('modalMainCategory').textContent = row.actual;
-                   });
-               });
-           } else {
-               document.getElementById('results').style.display = 'none';
-               document.getElementById('noData').style.display = 'block';
-           }
-           
-           // Event handler untuk tombol prediksi
-           const showPredictionBtn = document.getElementById('showPredictionBtn');
-           if (showPredictionBtn) {
-               showPredictionBtn.addEventListener('click', function() {
-                   document.getElementById('predictionForm').style.display = 'block';
-                   document.getElementById('results').style.display = 'none';
-                   document.getElementById('predictionResult').style.display = 'none';
-                   document.getElementById('title').value = '';
-                   window.scrollTo(0, 0);
-               });
-           }
-           
-           // Event handler untuk pembatalan prediksi
-           const cancelPredict = document.getElementById('cancelPredict');
-           if (cancelPredict) {
-               cancelPredict.addEventListener('click', function() {
-                   document.getElementById('predictionForm').style.display = 'none';
-                   document.getElementById('results').style.display = 'block';
-                   window.scrollTo(0, 0);
-               });
-           }
-           
-           // Event handler untuk kembali ke hasil
-           const backToResultsBtn = document.getElementById('backToResultsBtn');
-           if (backToResultsBtn) {
-               backToResultsBtn.addEventListener('click', function() {
-                   document.getElementById('predictionForm').style.display = 'none';
-                   document.getElementById('results').style.display = 'block';
-                   window.scrollTo(0, 0);
-               });
-           }
-           
-           // Event handler untuk prediksi baru
-           const newPredictionBtn = document.getElementById('newPredictionBtn');
-           if (newPredictionBtn) {
-               newPredictionBtn.addEventListener('click', function() {
-                   document.getElementById('predictionResult').style.display = 'none';
-                   document.getElementById('title').value = '';
-                   document.getElementById('predictForm').style.display = 'block';
-               });
-           }
-           
-           // Event handler untuk form prediksi
-           const predictForm = document.getElementById('predictForm');
-           if (predictForm) {
-               predictForm.addEventListener('submit', function(e) {
-                   e.preventDefault();
-                   
-                   const title = document.getElementById('title').value.trim();
-                   if (!title) {
-                       alert('Silakan masukkan judul skripsi!');
-                       return;
-                   }
-                   
-                   // Tampilkan loading
-                   document.getElementById('loadingPredict').style.display = 'block';
-                   document.getElementById('predictionResult').style.display = 'none';
-                   document.getElementById('predictForm').style.display = 'none';
-                   
-                   // Tambahkan upload_id jika ada
-                   const upload_id = <?= $upload_id ? $upload_id : 'null' ?>;
-                   
-                   // Kirim request ke API
-                   fetch('<?php echo API_URL; ?>/predict', {
-                       method: 'POST',
-                       headers: {
-                           'Content-Type': 'application/json',
-                       },
-                       body: JSON.stringify({ 
-                           title: title,
-                           upload_id: upload_id // Tambahkan upload_id
-                       })
-                   })
-                   .then(response => {
-                       if (!response.ok) {
-                           throw new Error('Network response was not ok');
-                       }
-                       return response.json();
-                   })
-                   .then(data => {
-                       // Sembunyikan loading
-                       document.getElementById('loadingPredict').style.display = 'none';
-                       
-                       // Tampilkan hasil prediksi
-                       document.getElementById('predictedTitle').textContent = data.title;
-                       document.getElementById('predictedKNN').textContent = data.knn_prediction;
-                       document.getElementById('predictedDT').textContent = data.dt_prediction;
-                       
-                       // Tampilkan confidence info jika ada
-                       if (data.nearest_neighbors && data.nearest_neighbors.length > 0) {
-                           document.getElementById('knnConfidence').textContent = "Berdasarkan " + data.nearest_neighbors[0];
-                       }
-                       
-                       // Pesan tentang hasil
-                       const predictionMessage = document.getElementById('predictionMessage');
-                       const knnMatch = data.knn_prediction === data.dt_prediction;
-                       
-                       if (knnMatch) {
-                           predictionMessage.textContent = "Kedua model memberikan hasil prediksi yang sama (" + data.knn_prediction + "), menunjukkan tingkat kepercayaan yang tinggi terhadap hasil klasifikasi judul ini.";
-                       } else {
-                           predictionMessage.textContent = "Model memberikan prediksi yang berbeda. Anda dapat mempertimbangkan hasil KNN (" + data.knn_prediction + ") atau Decision Tree (" + data.dt_prediction + ") berdasarkan akurasi yang telah ditunjukkan pada data pengujian.";
-                       }
-                       
-                       document.getElementById('predictionResult').style.display = 'block';
-                   })
-                   .catch(error => {
-                       // Sembunyikan loading
-                       document.getElementById('loadingPredict').style.display = 'none';
-                       document.getElementById('predictForm').style.display = 'block';
-                       
-                       console.error('Error:', error);
-                       alert('Terjadi kesalahan saat memproses prediksi. Silakan coba lagi.');
-                   });
-               });
-           }
-       });
-   </script>
+                // Filter tabel
+                filterTable();
+            });
+        });
+        
+        // Aktifkan pencarian
+        if (searchInput) {
+            searchInput.addEventListener('input', filterTable);
+        }
+    }
+    
+    // Event handler untuk detail modal
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.detail-btn')) {
+            const btn = e.target.closest('.detail-btn');
+            const title = btn.dataset.title;
+            const actual = btn.dataset.actual;
+            const knn = btn.dataset.knn;
+            const dt = btn.dataset.dt;
+            
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalCategory').textContent = actual;
+            document.getElementById('modalActual').textContent = actual;
+            document.getElementById('modalKNN').textContent = knn;
+            document.getElementById('modalDT').textContent = dt;
+            document.getElementById('modalMainCategory').textContent = actual;
+        }
+    });
+    
+    // Initialize charts dengan error handling
+    try {
+        createCategoryDistributionChart();
+    } catch (error) {
+        console.error('Failed to create category distribution chart:', error);
+    }
+    
+    try {
+        createTrainTestComparisonChart();
+    } catch (error) {
+        console.error('Failed to create train test comparison chart:', error);
+    }
+    
+    try {
+        createAccuracyChart();
+    } catch (error) {
+        console.error('Failed to create accuracy chart:', error);
+    }
+    
+    // Tampilkan hasil jika ada data
+    if ((trainingResults && trainingResults.length > 0) || (testingResults && testingResults.length > 0)) {
+        document.getElementById('results').style.display = 'block';
+        document.getElementById('noData').style.display = 'none';
+        
+        // Populate kedua tabel
+        if (trainingResults && trainingResults.length > 0) {
+            populateTable(trainingResults, 'trainingResultsTableBody', 'trainingResultsTable', 
+                        'training-filter-btn', 'trainingTableSearch', 'noTrainingResultsMessage');
+        }
+        
+        if (testingResults && testingResults.length > 0) {
+            populateTable(testingResults, 'testingResultsTableBody', 'testingResultsTable', 
+                        'testing-filter-btn', 'testingTableSearch', 'noTestingResultsMessage');
+        }
+    } else {
+        document.getElementById('results').style.display = 'none';
+        document.getElementById('noData').style.display = 'block';
+    }
+    
+    console.log('Result page initialized successfully');
+    console.log('Training results:', trainingResults.length);
+    console.log('Testing results:', testingResults.length);
+    console.log('Categories:', allCategories.length);
+        });
+        
+        // Global functions for external access
+        window.refreshResults = function() {
+            location.reload();
+        };
+        
+        window.showPredictionForm = function() {
+            document.getElementById('showPredictionBtn').click();
+        };
+        
+        // Error handling for uncaught errors
+        window.addEventListener('error', function(e) {
+            console.error('Global error:', e.error);
+            // Optionally show user-friendly error message
+        });
+        
+        // Handle page visibility change
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                // Page became visible, optionally refresh data
+                console.log('Page became visible');
+            }
+        });
+    </script>
 </body>
 </html>
+
+
